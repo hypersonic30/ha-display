@@ -1,7 +1,7 @@
 // ESP32 Display card: visual layout editor for the panels set up in the "ESP32 Display" integration.
 // Talks to Home Assistant only through the integration's WebSocket commands (display/...).
 
-const CARD_VERSION = "0.2.1";
+const CARD_VERSION = "0.2.2";
 const SCREEN_W = 480, SCREEN_H = 320, GRID = 5, MAX_WIDGETS = 32, MIN_SIZE = 20;
 
 const TYPES = {
@@ -511,12 +511,27 @@ class DisplayCardEditor extends HTMLElement {
   }
 }
 
-customElements.define("display-card", DisplayCard);
-customElements.define("display-card-editor", DisplayCardEditor);
+function register() {
+  customElements.define("display-card", DisplayCard);
+  customElements.define("display-card-editor", DisplayCardEditor);
+  window.customCards = window.customCards || [];
+  window.customCards.push({
+    type: "display-card",
+    name: "ESP32 Display",
+    description: `Layout-Editor für ESP32-Display-Panels (v${CARD_VERSION})`,
+  });
+}
 
-window.customCards = window.customCards || [];
-window.customCards.push({
-  type: "display-card",
-  name: "ESP32 Display",
-  description: `Layout-Editor für ESP32-Display-Panels (v${CARD_VERSION})`,
-});
+// This file is loaded very early as an "extra module". Home Assistant installs its own customElements registry
+// a moment later, and anything defined before that is invisible to it ("Custom element not found" in the card
+// picker, an endless spinner). So inside Home Assistant, wait until its app has defined itself.
+if (document.querySelector("home-assistant")) {
+  const started = Date.now();
+  const wait = () => {
+    if (customElements.get("home-assistant") || Date.now() - started > 30000) register();
+    else setTimeout(wait, 50);
+  };
+  wait();
+} else {
+  register();
+}

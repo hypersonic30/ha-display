@@ -32,7 +32,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *a, **k): super().__init__(*a, directory=WWW, **k)
     def log_message(self, *a): pass
     def do_GET(self):
-        if self.path == "/test.html":
+        if self.path == "/ha-sim.html":
+            body = b'<!doctype html><meta charset=utf-8><body><home-assistant></home-assistant><script type="module" src="/display-card.js"></script>'
+            self.send_response(200); self.send_header("Content-Type", "text/html"); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+        elif self.path == "/test.html":
             body = PAGE.encode(); self.send_response(200); self.send_header("Content-Type", "text/html"); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
         else: super().do_GET()
 
@@ -187,6 +190,16 @@ with sync_playwright() as p:
     mount(pg, stub(notAdmin=True))
     pg.click("display-card >> #setup"); pg.wait_for_timeout(200)
     check("non-admins get a clear message instead of the token", "Administratoren" in sh(pg, "r.getElementById('msg').textContent") and "SECRET" not in sh(pg, "r.innerHTML"))
+
+    # ── inside Home Assistant the card must wait for the app's own element registry ──────────────────
+    sim = b.new_page()
+    sim.goto(f"http://127.0.0.1:{PORT}/ha-sim.html"); sim.wait_for_timeout(500)
+    check("inside HA nothing is defined while the app has not started (HA swaps the registry later)",
+          not sim.evaluate("() => !!customElements.get('display-card')") and not sim.evaluate("() => (window.customCards || []).length"))
+    sim.evaluate("() => customElements.define('home-assistant', class extends HTMLElement {})"); sim.wait_for_timeout(300)
+    check("once the app is up the card and its editor are defined and listed",
+          sim.evaluate("() => !!customElements.get('display-card') && !!customElements.get('display-card-editor')")
+          and sim.evaluate("() => window.customCards.map(c => c.type)") == ["display-card"])
 
     check("no JavaScript errors on the page", not errors, errors)
     b.close()

@@ -111,4 +111,4 @@ async def test_card_is_served_and_loaded_with_a_version(hass, make_entry, hass_c
     resp = await client.get("/display/static/display-card.js")
     assert resp.status == 200 and "display-card" in await resp.text()
     from homeassistant.components.frontend import DATA_EXTRA_MODULE_URL  # noqa: PLC0415
-    assert "/display/static/display-card.js?v=0.2.1" in hass.data[DATA_EXTRA_MODULE_URL].urls
+    assert "/display/static/display-card.js?v=0.2.2" in hass.data[DATA_EXTRA_MODULE_URL].urls
