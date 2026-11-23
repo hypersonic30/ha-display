@@ -8,7 +8,7 @@
 /* Color depth: 1, 8, 16, 32 */
 #define LV_COLOR_DEPTH 16
 
-/* ILI9488 is 480x320, landscape */
+/* ILI9488/ILI9481 are 480x320, landscape */
 #define LV_HOR_RES_MAX 480
 #define LV_VER_RES_MAX 320
 

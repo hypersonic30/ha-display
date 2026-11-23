@@ -13,7 +13,7 @@ Selbstgebautes Touch-Panel (ESP32 + ILI9488 480×320) für Home Assistant. Das L
 | Bauteil | Wert |
 |---|---|
 | MCU | ESP32-WROOM-32D |
-| Display | ILI9488 480×320, SPI |
+| Display | ILI9488 **oder** ILI9481, 480×320, SPI |
 | Touch | XPT2046 |
 
 Pinbelegung (wie im Schaltplan):
@@ -42,17 +42,22 @@ Die Karte wird automatisch geladen, ein manueller Ressourcen-Eintrag ist nicht n
 
 ### 2. Firmware flashen
 
-Fertige Dateien liegen in [`firmware/bin/`](firmware/bin) und bei den [Releases](https://github.com/hypersonic30/ha-display/releases).
+Fertige Dateien liegen in [`firmware/bin/`](firmware/bin) und bei den [Releases](https://github.com/hypersonic30/ha-display/releases). **Nimm die Datei passend zu deinem Display-Controller:**
+
+| Controller | Firmware |
+|---|---|
+| ILI9488 | `firmware-ili9488.bin` |
+| ILI9481 | `firmware-ili9481.bin` |
 
 ```bash
 pip install esptool
 esptool.py --chip esp32 --port /dev/ttyUSB0 --baud 921600 write_flash \
   0x1000  bootloader.bin \
   0x8000  partitions.bin \
-  0x10000 firmware.bin
+  0x10000 firmware-ili9488.bin        # oder firmware-ili9481.bin
 ```
 
-(Windows: Port z. B. `COM3`.) Beim ersten Start kalibrierst du den Touch: die Markierungen an den Ecken antippen. Die Werte werden gespeichert; **beim Einschalten 3 s den Touch halten** kalibriert neu.
+(Windows: Port z. B. `COM3`.) Bleibt das Display weiß oder zeigt Müll, ist es der falsche Controller. Sind beim ILI9481 Rot und Blau vertauscht oder die Farben negativ, siehe die Hinweise in `firmware/platformio.ini`. Beim ersten Start kalibrierst du den Touch: die Markierungen an den Ecken antippen. Die Werte werden gespeichert; **beim Einschalten 3 s den Touch halten** kalibriert neu.
 
 ### 3. Display einrichten
 
@@ -116,7 +121,8 @@ Das Display hält **eine** Verbindung zur Integration. Die schickt Layout und Zu
 ## Selbst bauen
 
 ```bash
-cd firmware && pio run            # Binary: .pio/build/esp32/firmware.bin
+cd firmware && pio run                  # beide Varianten: .pio/build/ili9488|ili9481/firmware.bin
+cd firmware && pio run -e ili9481      # nur eine Variante
 ```
 
 Die Fonts (Montserrat mit Latin-1 und €) liegen fertig in `firmware/src/fonts/`; neu erzeugen mit `python firmware/tools/gen_fonts.py`.
