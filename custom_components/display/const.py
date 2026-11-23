@@ -6,11 +6,14 @@ CONF_BRIGHTNESS = "brightness"
 CONF_DEVICE_KEY = "device_key"
 CONF_NEW_KEY = "new_key"
 CONF_ROTATION = "rotation"
+CONF_SIDEBAR = "sidebar"
 
 SUBENTRY_DEVICE = "device"
 
 STATIC_PATH = "/display/static"
 CARD_FILE = "display-card.js"
+PANEL_FILE = "display-panel.js"
+PANEL_URL = "display-editor"
 
 SCREEN_W = 480        # landscape size; rotation 1 and 3 swap the two
 SCREEN_H = 320

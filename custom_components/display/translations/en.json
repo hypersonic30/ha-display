@@ -5,19 +5,23 @@
         "title": "Connect ESP32 displays",
         "description": "One connection for all panels. The panels only talk to this integration and need no Home Assistant token - each one gets its own device code later. Add the panels afterwards.",
         "data": {
-          "ha_url": "Home Assistant URL"
+          "ha_url": "Home Assistant URL",
+          "sidebar": "Show editor in the sidebar"
         },
         "data_description": {
-          "ha_url": "How the panels reach Home Assistant, e.g. http://192.168.1.10:8123"
+          "ha_url": "How the panels reach Home Assistant, e.g. http://192.168.1.10:8123",
+          "sidebar": "Adds an ESP32 Display entry to the sidebar (administrators only) with the layout editor, so no dashboard card is needed."
         }
       },
       "reconfigure": {
         "title": "Edit connection",
         "data": {
-          "ha_url": "Home Assistant URL"
+          "ha_url": "Home Assistant URL",
+          "sidebar": "Show editor in the sidebar"
         },
         "data_description": {
-          "ha_url": "How the panels reach Home Assistant. With a new address the panels have to be set up again."
+          "ha_url": "How the panels reach Home Assistant. With a new address the panels have to be set up again.",
+          "sidebar": "Adds an ESP32 Display entry to the sidebar (administrators only) with the layout editor, so no dashboard card is needed."
         }
       }
     },

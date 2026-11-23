@@ -5,19 +5,23 @@
         "title": "ESP32-Displays verbinden",
         "description": "Eine Verbindung für alle Displays. Die Displays reden nur mit dieser Integration und brauchen kein Home-Assistant-Token - jedes bekommt später einen eigenen Gerätecode. Die Displays fügst du danach hinzu.",
         "data": {
-          "ha_url": "Home-Assistant-URL"
+          "ha_url": "Home-Assistant-URL",
+          "sidebar": "Editor in der Seitenleiste anzeigen"
         },
         "data_description": {
-          "ha_url": "So erreichen die Displays Home Assistant, z. B. http://192.168.1.10:8123"
+          "ha_url": "So erreichen die Displays Home Assistant, z. B. http://192.168.1.10:8123",
+          "sidebar": "Fügt der Seitenleiste einen Eintrag ESP32 Display (nur für Administratoren) mit dem Layout-Editor hinzu, damit keine Dashboard-Karte nötig ist."
         }
       },
       "reconfigure": {
         "title": "Verbindung bearbeiten",
         "data": {
-          "ha_url": "Home-Assistant-URL"
+          "ha_url": "Home-Assistant-URL",
+          "sidebar": "Editor in der Seitenleiste anzeigen"
         },
         "data_description": {
-          "ha_url": "So erreichen die Displays Home Assistant. Bei einer neuen Adresse müssen die Displays neu eingerichtet werden."
+          "ha_url": "So erreichen die Displays Home Assistant. Bei einer neuen Adresse müssen die Displays neu eingerichtet werden.",
+          "sidebar": "Fügt der Seitenleiste einen Eintrag ESP32 Display (nur für Administratoren) mit dem Layout-Editor hinzu, damit keine Dashboard-Karte nötig ist."
         }
       }
     },

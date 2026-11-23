@@ -360,6 +360,15 @@ with sync_playwright() as p:
     pg.click("display-card >> #p-pgbg-x"); pg.wait_for_timeout(50)
     check("Standard clears the page background", sh(pg, "card._pages[1].bg") == "" and pg.evaluate("() => card.shadowRoot.getElementById('screen').style.background") == "")
 
+    # ── sidebar panel ─────────────────────────────────────────────────────────
+    mount(pg, stub(), None, STATES)
+    pg.add_script_tag(url="/display-panel.js"); pg.wait_for_timeout(200)
+    pg.evaluate("""() => { const p = document.createElement('display-panel'); p.hass = window.hass; p.narrow = true; p.panel = {}; p.route = {}; document.body.innerHTML = ''; document.body.appendChild(p); window.panelEl = p; }""")
+    pg.wait_for_timeout(500)
+    check("the sidebar panel shows the editor with a menu button", pg.evaluate("() => !!panelEl.querySelector('display-card') && !!panelEl.querySelector('ha-menu-button')"))
+    check("and the editor gets hass and works (device list loaded)", pg.evaluate("() => panelEl.querySelector('display-card').shadowRoot.querySelectorAll('#dev option').length") == 2)
+    check("the menu button knows the narrow layout", pg.evaluate("() => panelEl.querySelector('ha-menu-button').narrow") is True)
+
     # ── inside Home Assistant the card must wait for the app's own element registry ──────────────────
     sim = b.new_page()
     sim.goto(f"http://127.0.0.1:{PORT}/ha-sim.html"); sim.wait_for_timeout(500)

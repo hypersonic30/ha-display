@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from homeassistant.components.frontend import add_extra_js_url
+from homeassistant.components import panel_custom
+from homeassistant.components.frontend import add_extra_js_url, async_remove_panel
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
@@ -12,7 +13,7 @@ from homeassistant.loader import async_get_integration
 from homeassistant.helpers.typing import ConfigType
 
 from . import websocket_api
-from .const import CARD_FILE, CONF_DEVICE_KEY, DOMAIN, STATIC_PATH
+from .const import CARD_FILE, CONF_DEVICE_KEY, CONF_SIDEBAR, DOMAIN, PANEL_FILE, PANEL_URL, STATIC_PATH
 from .devices import device_subentries, rotation_of, screen_size
 from .firmware import DisplayFirmwareView, async_load_bundle
 from .layouts import LayoutStore
@@ -58,6 +59,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if keys.get(session.device_id) != session.key:
             await session.close(CLOSE_GONE, "gone")
 
+    if entry.data.get(CONF_SIDEBAR, True) and PANEL_URL not in hass.data.get("frontend_panels", {}):
+        integration = await async_get_integration(hass, DOMAIN)
+        await panel_custom.async_register_panel(
+            hass,
+            webcomponent_name="display-panel",
+            frontend_url_path=PANEL_URL,
+            module_url=f"{STATIC_PATH}/{PANEL_FILE}?v={integration.version}",
+            sidebar_title="ESP32 Display",
+            sidebar_icon="mdi:monitor-edit",
+            require_admin=True,
+            config={},
+        )
+        hass.data[DOMAIN]["sidebar"] = True
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_reload))
     # Panels that stay connected across a reload get changed settings (e.g. brightness) right away.
@@ -67,6 +82,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    if hass.data[DOMAIN].pop("sidebar", False):
+        async_remove_panel(hass, PANEL_URL)
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
 

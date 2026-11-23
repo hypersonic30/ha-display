@@ -8,6 +8,7 @@
   "dependencies": [
     "http",
     "frontend",
+    "panel_custom",
     "websocket_api"
   ],
   "documentation": "https://github.com/hypersonic30/ha-display",

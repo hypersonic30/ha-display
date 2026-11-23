@@ -21,10 +21,10 @@ async def _start(hass):
 
 async def test_the_connection_needs_only_the_address_no_token(hass):
     result = await _start(hass)
-    assert result["type"] is FlowResultType.FORM and list(result["data_schema"].schema) == [CONF_HA_URL]
+    assert result["type"] is FlowResultType.FORM and list(result["data_schema"].schema) == [CONF_HA_URL, "sidebar"]
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_HA_URL: " http://192.168.1.10:8123/ "})
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["data"] == {CONF_HA_URL: "http://192.168.1.10:8123"}
+    assert result["data"] == {CONF_HA_URL: "http://192.168.1.10:8123", "sidebar": True}
 
 
 async def test_bad_address_is_reported(hass):
@@ -47,7 +47,7 @@ async def test_address_can_be_changed(hass, make_entry):
     )
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_HA_URL: "https://ha.example.org/"})
     assert result["type"] is FlowResultType.ABORT and result["reason"] == "reconfigure_successful"
-    assert entry.data == {CONF_HA_URL: "https://ha.example.org"}
+    assert entry.data == {CONF_HA_URL: "https://ha.example.org", "sidebar": True}
 
 
 async def _new_display(hass, entry, name, brightness=50):
@@ -112,3 +112,41 @@ async def test_orientation_is_chosen_per_display_and_stored_as_a_number(hass, ma
     import pytest  # noqa: PLC0415
     with pytest.raises(vol.Invalid):
         await flow.async_configure(result["flow_id"], {CONF_NAME: "Keller", CONF_BRIGHTNESS: 50, CONF_ROTATION: "7"})
+
+
+# ── sidebar panel ───────────────────────────────────────────────────────────
+
+async def _panels(hass):
+    return hass.data.get("frontend_panels", {})
+
+
+async def test_sidebar_panel_is_on_by_default_admin_only_and_removed_on_unload(hass, make_entry):
+    entry = make_entry()
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    panel = (await _panels(hass)).get("display-editor")
+    assert panel is not None and panel.require_admin is True
+    assert panel.config["_panel_custom"]["name"] == "display-panel"
+    assert "display-panel.js" in panel.config["_panel_custom"]["module_url"]
+    await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert "display-editor" not in await _panels(hass)
+    await hass.config_entries.async_setup(entry.entry_id)        # reload must not trip over the old registration
+    await hass.async_block_till_done()
+    assert "display-editor" in await _panels(hass)
+
+
+async def test_sidebar_panel_can_be_switched_off(hass):
+    from pytest_homeassistant_custom_component.common import MockConfigEntry  # noqa: PLC0415
+    entry = MockConfigEntry(domain=DOMAIN, title="ESP32 Display", data={CONF_HA_URL: "http://ha.test:8123", "sidebar": False})
+    entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert "display-editor" not in await _panels(hass)
+
+
+async def test_sidebar_choice_is_part_of_the_connection_form(hass):
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
+    assert "sidebar" in result["data_schema"].schema
+    done = await hass.config_entries.flow.async_configure(result["flow_id"], {"ha_url": "http://ha.test:8123/", "sidebar": False})
+    assert done["data"] == {"ha_url": "http://ha.test:8123", "sidebar": False}

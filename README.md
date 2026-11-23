@@ -94,6 +94,7 @@ device: Küche      # optional: ohne Angabe wählst du das Display in der Karte 
 
 ## Layout-Editor
 
+- Den Editor gibt es zusätzlich als Eintrag **ESP32 Display in der Seitenleiste** (nur für Administratoren, ohne Dashboard-Karte). Abschalten unter *Verbindung bearbeiten → Editor in der Seitenleiste anzeigen*.
 - Element aus der **Palette** ziehen oder anklicken
 - Auf dem Display-Abbild verschieben (Raster 5 px), an der Ecke **Größe ändern**, Pfeiltasten verschieben (Shift = 5 px), `Entf` löscht
 - Rechts: **Entität**, **Beschriftung**, Einheit, Min/Max, Position und Größe
