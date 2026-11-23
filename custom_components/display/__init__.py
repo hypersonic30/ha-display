@@ -3,8 +3,9 @@ from __future__ import annotations
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.components.http import StaticPathConfig
+from homeassistant.components.frontend import add_extra_js_url
 
-from .const import DOMAIN, WS_PATH
+from .const import DOMAIN, WS_PATH, CARD_FILE
 from .views import LayoutStore, DisplayLayoutView, DisplayDevicesView
 
 _STORE_KEY = f"{DOMAIN}_store"
@@ -18,6 +19,8 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     await hass.http.async_register_static_paths(
         [StaticPathConfig(WS_PATH, www_path, cache_headers=False)]
     )
+    # Auto-register card — no manual Lovelace resource entry needed after HACS install
+    add_extra_js_url(hass, f"{WS_PATH}/{CARD_FILE}")
 
     # Shared layout store (one instance for all config entries)
     store = LayoutStore(hass)
