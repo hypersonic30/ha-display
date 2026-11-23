@@ -6,7 +6,6 @@ __pycache__/
 
 # PlatformIO
 firmware/.pio/
-firmware/include/secrets.h
 
 # pytest
 .pytest_cache/

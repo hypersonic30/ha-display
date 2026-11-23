@@ -8,6 +8,13 @@ static WebServer  server(80);
 static DNSServer  dns;
 static Config     saved_cfg;
 static bool       cfg_ready = false;
+static char       ap_pass[9];
+
+static String trimmed(const char *s) {
+    String t(s);
+    t.trim();
+    return t;
+}
 
 // ── HTML page (embedded) ──────────────────────────────────────────────────────
 
@@ -66,7 +73,7 @@ button[type=submit]:disabled{opacity:.5;cursor:not-allowed}
     <label>Long-Lived Access Token</label>
     <input name="ha_token" type="password" placeholder="eyJ..." required autocomplete="off">
     <label>Gerätename</label>
-    <input name="device_name" placeholder="z.B. Küche" required value="ESP32 Display">
+    <input name="device_name" placeholder="z.B. Küche – muss in HA angelegt sein" required>
   </div>
 
   <button type="submit" id="btn">Verbinden &amp; Speichern</button>
@@ -94,6 +101,8 @@ document.getElementById('frm').addEventListener('submit',async e=>{
   btn.disabled=true;
   status('<span class="spinner"></span>Speichere und starte neu...','info');
   const data=Object.fromEntries(new FormData(e.target));
+  for(const k of ['ha_url','ha_token','device_name'])data[k]=data[k].trim();
+  data.ha_url=data.ha_url.replace(/\/+$/,'');
   try{
     const r=await fetch('/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
     const j=await r.json();
@@ -146,22 +155,28 @@ static void handle_save() {
         return;
     }
 
-    const char *ssid   = doc["ssid"]        | "";
-    const char *pass   = doc["password"]    | "";
-    const char *ha_url = doc["ha_url"]      | "";
-    const char *token  = doc["ha_token"]    | "";
-    const char *name   = doc["device_name"] | "ESP32 Display";
+    const char *ssid  = doc["ssid"]     | "";
+    const char *pass  = doc["password"] | "";
+    String ha_url = trimmed(doc["ha_url"]      | "");
+    String token  = trimmed(doc["ha_token"]    | "");
+    String name   = trimmed(doc["device_name"] | "");
+    while (ha_url.endsWith("/")) ha_url.remove(ha_url.length() - 1);
 
-    if (!ssid[0] || !ha_url[0] || !token[0]) {
+    if (!ssid[0] || !ha_url.length() || !token.length() || !name.length()) {
         server.send(400, "application/json", "{\"ok\":false,\"error\":\"Felder fehlen\"}");
+        return;
+    }
+    if (!ha_url.startsWith("http://") && !ha_url.startsWith("https://")) {
+        server.send(400, "application/json",
+                    "{\"ok\":false,\"error\":\"URL muss mit http:// oder https:// beginnen\"}");
         return;
     }
 
     strlcpy(saved_cfg.wifi_ssid,   ssid,   sizeof(saved_cfg.wifi_ssid));
     strlcpy(saved_cfg.wifi_pass,   pass,   sizeof(saved_cfg.wifi_pass));
-    strlcpy(saved_cfg.ha_url,      ha_url, sizeof(saved_cfg.ha_url));
-    strlcpy(saved_cfg.ha_token,    token,  sizeof(saved_cfg.ha_token));
-    strlcpy(saved_cfg.device_name, name,   sizeof(saved_cfg.device_name));
+    strlcpy(saved_cfg.ha_url,      ha_url.c_str(), sizeof(saved_cfg.ha_url));
+    strlcpy(saved_cfg.ha_token,    token.c_str(),  sizeof(saved_cfg.ha_token));
+    strlcpy(saved_cfg.device_name, name.c_str(),   sizeof(saved_cfg.device_name));
     cfg_ready = true;
 
     server.send(200, "application/json", "{\"ok\":true}");
@@ -179,8 +194,13 @@ static void handle_captive() {
 void provisioning_begin(const char *ap_ssid) {
     cfg_ready = false;
 
+    // No look-alike characters (0/O, 1/I/L): the password is read off the display
+    static const char CHARS[] = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+    for (int i = 0; i < 8; i++) ap_pass[i] = CHARS[esp_random() % (sizeof(CHARS) - 1)];
+    ap_pass[8] = 0;
+
     WiFi.mode(WIFI_AP_STA);  // AP + STA so we can scan networks
-    WiFi.softAP(ap_ssid);
+    WiFi.softAP(ap_ssid, ap_pass);
     delay(100);
 
     dns.start(53, "*", IPAddress(192, 168, 4, 1));
@@ -198,6 +218,10 @@ void provisioning_begin(const char *ap_ssid) {
 
     server.begin();
     Serial.println("[PROV] AP started, web server on 192.168.4.1");
+}
+
+const char *provisioning_ap_pass() {
+    return ap_pass;
 }
 
 void provisioning_handle() {

@@ -1,13 +1,20 @@
 {
   "domain": "display",
   "name": "ESP32 Display",
-  "version": "0.1.0",
+  "codeowners": [
+    "@hypersonic30"
+  ],
   "config_flow": true,
-  "documentation": "",
-  "issue_tracker": "",
-  "dependencies": [],
-  "codeowners": ["@hypersonic30"],
-  "requirements": [],
+  "dependencies": [
+    "http",
+    "frontend",
+    "websocket_api"
+  ],
+  "documentation": "https://github.com/hypersonic30/ha-display",
+  "integration_type": "hub",
   "iot_class": "local_push",
-  "homeassistant": "2025.4.0"
+  "issue_tracker": "https://github.com/hypersonic30/ha-display/issues",
+  "requirements": [],
+  "single_config_entry": true,
+  "version": "0.2.0"
 }

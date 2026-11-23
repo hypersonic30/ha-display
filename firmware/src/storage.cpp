@@ -30,9 +30,18 @@ void storage_save(const Config &cfg) {
     p.end();
 }
 
-void storage_clear() {
+bool storage_load_touch(uint16_t cal[5]) {
+    Preferences p;
+    p.begin(NS, true);
+    bool ok = p.getBytesLength("touch_cal") == 5 * sizeof(uint16_t) &&
+              p.getBytes("touch_cal", cal, 5 * sizeof(uint16_t)) == 5 * sizeof(uint16_t);
+    p.end();
+    return ok;
+}
+
+void storage_save_touch(const uint16_t cal[5]) {
     Preferences p;
     p.begin(NS, false);
-    p.clear();
+    p.putBytes("touch_cal", cal, 5 * sizeof(uint16_t));
     p.end();
 }

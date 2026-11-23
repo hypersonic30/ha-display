@@ -1,210 +1,132 @@
-# ESP32 Display – Home Assistant Panel
+# ESP32 Display – Home-Assistant-Panel
 
-Fertige Firmware + HA-Integration + Lovelace-Card für ein selbstgebautes ESP32-Panel mit ILI9488-Touchdisplay.  
-Widgets werden **ohne Reflashing** direkt in Home Assistant grafisch zugewiesen.
+Selbstgebautes Touch-Panel (ESP32 + ILI9488 480×320) für Home Assistant. Das Layout gestaltest du **grafisch in Home Assistant** – ohne die Firmware neu zu flashen. Änderungen erscheinen sofort auf dem Display.
 
----
+- **Eine Integration, ein Token, beliebig viele Displays** – Geräte sind Unterkonten der Integration
+- **Visueller Editor** (Lovelace-Karte): Elemente ziehen, Entität wählen, speichern
+- **Fertige Firmware** zum Flashen, Ersteinrichtung per WLAN-Hotspot am Handy
+- **Live-Werte** und **Touch-Bedienung** (Taster, Schalter) direkt am Display
+- Alles aus einem Repository, Installation über **HACS**
 
 ## Hardware
 
 | Bauteil | Wert |
 |---|---|
 | MCU | ESP32-WROOM-32D |
-| Display | ILI9488 480×320 SPI TFT |
+| Display | ILI9488 480×320, SPI |
 | Touch | XPT2046 |
-| Backlight | GPIO 35 (PWM) |
 
-**SPI-Pinbelegung**
+Pinbelegung (wie im Schaltplan):
 
-| Signal | GPIO |
-|---|---|
-| MOSI | 23 |
-| SCLK | 18 |
-| MISO | 19 |
-| TFT CS | 15 |
-| TFT DC | 2 |
-| TFT RST | 4 |
-| Touch CS | 14 |
+| Signal | GPIO | Signal | GPIO |
+|---|---|---|---|
+| MOSI | 23 | TFT CS | 15 |
+| SCLK | 18 | TFT DC | 2 |
+| MISO | 19 | TFT RST | 4 |
+| Touch CS | 14 | Backlight (TFT_LED) | **32** |
 
----
-
-## Features
-
-- **5 Widget-Typen** – Label, Button, Gauge, Switch, Bar
-- **Visueller Editor** in Home Assistant (Lovelace Card) – Widgets per Drag & Drop platzieren
-- **Ersteinrichtung per Hotspot** – WLAN + HA-Zugangsdaten über Web-GUI eingeben, kein Reflashing
-- **Live-Updates** über HA WebSocket API – Zustände sofort auf dem Display
-- **Touch-Steuerung** – Button/Switch sendet HA-Service-Calls direkt vom Panel
-- **HACS-kompatibel** – Installation als Custom Integration
-
----
+T_IRQ (IO27) und der Piezo-Treiber (IO26) werden von der Firmware nicht genutzt.
 
 ## Installation
 
-### 1. ESP32 flashen
+### 1. Integration über HACS
 
-#### Option A – Fertige Firmware (empfohlen)
+1. HACS → ⋮ → **Benutzerdefinierte Repositories** → `https://github.com/hypersonic30/ha-display`, Kategorie **Integration**
+2. **ESP32 Display** installieren, Home Assistant neu starten
+3. **Einstellungen → Geräte & Dienste → Integration hinzufügen → ESP32 Display**
+   - **Home-Assistant-URL**: so erreichen die Displays Home Assistant (vorausgefüllt), z. B. `http://192.168.1.10:8123`
+   - **Langlebiges Zugriffstoken**: Profil → Sicherheit → *Langlebige Zugriffstoken*. Dieses **eine** Token tippst du später in jedes Display ein.
+4. In der Integration **Display hinzufügen** – Name (z. B. `Küche`) und Helligkeit. Das ist ein Unterkonto; weitere Displays fügst du genauso hinzu.
 
-Benötigt: Python 3 + `esptool`
+Die Karte wird automatisch geladen, ein manueller Ressourcen-Eintrag ist nicht nötig. Jedes Display bekommt außerdem einen Sensor **„Verbunden“** (z. B. für eine Automatisierung „Display offline“).
+
+> **Tipp zur Sicherheit:** Lege das Token für einen eigenen Benutzer **ohne Administrator-Rechte** an (Einstellungen → Personen → Benutzer). Das Token liegt im Flash der Displays; so kann damit niemand mehr als nötig tun. Die Integration prüft das Token lokal und fragt neu danach (Reparatur-Hinweis), falls es gelöscht wurde.
+
+### 2. Firmware flashen
+
+Fertige Dateien liegen in [`firmware/bin/`](firmware/bin) und bei den [Releases](https://github.com/hypersonic30/ha-display/releases).
 
 ```bash
 pip install esptool
+esptool.py --chip esp32 --port /dev/ttyUSB0 --baud 921600 write_flash \
+  0x1000  bootloader.bin \
+  0x8000  partitions.bin \
+  0x10000 firmware.bin
 ```
 
-Dann flashen (Port anpassen, z. B. `COM3` unter Windows oder `/dev/ttyUSB0` unter Linux):
+(Windows: Port z. B. `COM3`.) Beim ersten Start kalibrierst du den Touch: die Markierungen an den Ecken antippen. Die Werte werden gespeichert; **beim Einschalten 3 s den Touch halten** kalibriert neu.
 
-```bash
-esptool.py --chip esp32 --port /dev/ttyUSB0 --baud 921600 \
-  write_flash \
-  0x1000  firmware/bin/bootloader.bin \
-  0x8000  firmware/bin/partitions.bin \
-  0x10000 firmware/bin/firmware.bin
-```
+### 3. Display einrichten
 
-Die fertige `firmware.bin` findet sich auch unter [Releases](https://github.com/hypersonic30/ha-display/releases).
+Ohne gespeicherte Zugangsdaten öffnet das Display einen WLAN-Hotspot. **SSID und Passwort stehen auf dem Display** (WPA2, das Passwort ändert sich bei jedem Start).
 
-#### Option B – Selbst kompilieren (PlatformIO)
+1. Mit dem Hotspot `ESP32-Display-XXXX` verbinden, im Browser `http://192.168.4.1` öffnen
+2. WLAN wählen und Passwort eingeben
+3. **Gerätename** – genau der Name aus Schritt 1.4 (Groß-/Kleinschreibung, Leerzeichen und Umlaute sind egal: `kuche` findet `Küche`)
+4. **Home-Assistant-URL** und **Token** – beides zeigt dir die Karte unter **Einrichtung** an (zum Kopieren)
 
-```bash
-cd firmware
-pio run --target upload
-```
+Danach verschwindet der Hotspot, das Display verbindet sich und lädt sein Layout. Bei Problemen zeigt es den Grund an (WLAN nicht erreichbar, Token ungültig, Gerät in HA nicht angelegt) und versucht es weiter – gespeicherte Daten werden nie automatisch gelöscht. **Touch 3 s halten** auf einem Statusbildschirm öffnet die Einrichtung erneut.
 
-Benötigt PlatformIO (`pip install platformio`) und die Datei `firmware/include/secrets.h` (optional, nur für compile-time-Defaults).
+### 4. Karte hinzufügen
 
----
-
-### 2. HA-Integration über HACS installieren
-
-1. **HACS** → ⋮ → **Custom Repositories**
-   - URL: `https://github.com/hypersonic30/ha-display`
-   - Kategorie: **Integration**
-2. **HACS → Integrationen → ESP32 Display → Installieren**
-3. **Home Assistant neu starten**
-4. **Einstellungen → Geräte & Dienste → Integration hinzufügen → ESP32 Display**
-   - Gerätename eintragen (muss mit dem Panel übereinstimmen, z. B. `Küche`)
-   - HA-URL und Long-Lived Access Token
-
-Die Lovelace-Card wird automatisch mit geladen – kein manueller Ressource-Eintrag nötig.
-
----
-
-### 3. Lovelace-Card hinzufügen
-
-Dashboard bearbeiten → **Card hinzufügen** → `Benutzerdefiniert` → `ESP32 Display`:
+Dashboard bearbeiten → Karte hinzufügen → **ESP32 Display** (oder YAML):
 
 ```yaml
 type: custom:display-card
-device: Küche
+device: Küche      # optional: ohne Angabe wählst du das Display in der Karte aus
 ```
-
-Oder im UI-Editor: Suche nach **ESP32 Display**.
-
----
-
-## Ersteinrichtung am Panel
-
-Beim ersten Start (keine gespeicherten Zugangsdaten) öffnet der ESP32 automatisch einen Hotspot:
-
-```
-SSID: ESP32-Display-XXYY
-```
-
-1. Mit dem Hotspot verbinden
-2. Browser öffnen: **http://192.168.4.1**
-3. WLAN-Netzwerk auswählen, Passwort, HA-URL (`http://192.168.1.x:8123`) und Token eingeben
-4. Speichern – das Panel verbindet sich und zeigt „Layout wird geladen…"
-
-Nach erfolgreicher Verbindung verschwindet der Hotspot automatisch.
-
-> Bei falscher WLAN-Konfiguration startet das Panel nach 20 s neu und öffnet wieder den Hotspot.
-
----
 
 ## Layout-Editor
 
-Im Lovelace-Editor ist ein **480×320-Canvas** zu sehen (skaliert auf die verfügbare Breite).
+- Element aus der **Palette** ziehen oder anklicken
+- Auf dem Display-Abbild verschieben (Raster 5 px), an der Ecke **Größe ändern**, Pfeiltasten verschieben (Shift = 5 px), `Entf` löscht
+- Rechts: **Entität**, **Beschriftung**, Einheit, Min/Max, Position und Größe
+- Die Vorschau zeigt die **aktuellen Werte** aus Home Assistant
+- **Speichern** prüft das Layout in Home Assistant und schickt es sofort ans Display
 
-### Widgets hinzufügen
-
-- Widget aus der **Palette** (links) auf den Canvas ziehen **oder** anklicken
-- Widget positionieren durch Ziehen direkt auf dem Canvas
-
-### Widget konfigurieren
-
-Klick auf ein Widget öffnet das **Properties-Panel** (rechts):
-
-| Feld | Beschreibung |
-|---|---|
-| Entität | HA-Entity-ID (gefiltert nach Widget-Typ) |
-| Bezeichnung | Anzeigename auf dem Panel |
-| Einheit | z. B. `°C`, `%`, `W` |
-| Min / Max | Wertebereich für Gauge und Bar |
-| Service-Domain | Domain für Button/Switch (z. B. `light`, `switch`) |
-| X / Y / Breite / Höhe | Position und Größe in Pixeln |
-
-### Speichern
-
-**Speichern** überträgt das Layout an die HA-Integration. Das Panel lädt es automatisch ohne Neustart.
-
----
-
-## Widget-Typen
-
-| Typ | Beschreibung | Empfohlene Entitäten |
+| Element | Zweck | Bedienung am Display |
 |---|---|---|
-| `label` | Textwert mit optionaler Einheit | `sensor.*`, `input_number.*` |
-| `button` | Schaltfläche, sendet `turn_on` / `turn_off` | `light.*`, `switch.*`, `script.*` |
-| `gauge` | Kreisanzeige mit Min/Max | `sensor.*`, `input_number.*` |
-| `switch` | Toggle-Schalter | `light.*`, `switch.*`, `input_boolean.*` |
-| `bar` | Balkenanzeige mit Prozentwert | `sensor.*`, `input_number.*` |
+| Wert | Zustand mit optionaler Einheit | – |
+| Taster | leuchtet, wenn `on` | tippen: `button`/`input_button` → drücken, `scene`/`script` → starten, sonst umschalten |
+| Anzeige | Ringanzeige mit Min/Max | – |
+| Schalter | Ein/Aus | tippen: ein-/ausschalten |
+| Balken | Fortschrittsbalken mit Wert | – |
 
----
+Grenzen: höchstens 32 Elemente, Beschriftung ≤ 31 und Einheit ≤ 15 Bytes (Umlaute und ° zählen doppelt). Umlaute, `°` und `€` werden dargestellt.
 
-## Architektur
+## So funktioniert es
 
 ```
-[HA Lovelace Card]  ──POST /api/display/layout/{device}──►  [HA Integration]
-                    ◄─GET  /api/display/layout/{device}──   [HA Integration]
-[ESP32 Firmware]    ──► ws://ha:8123/api/websocket ──────►  [HA WebSocket API]
-[ILI9488 Display]   ◄── LVGL Widget Rendering
+Lovelace-Karte ──WebSocket──▶ Integration (speichert Layouts, prüft sie)
+                                   │  display/layout/subscribe (Live-Push)
+ESP32-Firmware ◀──WebSocket────────┘  + Zustände per subscribe_entities, Aktionen per call_service
 ```
 
-- **ESP32-Firmware**: PlatformIO + Arduino, LVGL 8.4, TFT_eSPI
-- **HA-Integration**: Python, `HomeAssistantView` REST-Endpoints, `Store` für Layout-Persistenz
-- **Lovelace-Card**: Vanilla JS, kein Framework, Shadow DOM
+Die Firmware hält **eine** WebSocket-Verbindung zu Home Assistant. Layout-Änderungen und Zustände kommen darüber live an, Touch-Aktionen gehen als Service-Aufruf zurück.
 
----
+## Fehlersuche
 
-## Selbst kompilieren
+| Anzeige / Verhalten | Ursache |
+|---|---|
+| „Gerät … ist in Home Assistant nicht angelegt“ | Name am Display ≠ Name in der Integration |
+| „Token ungültig“ | Token gelöscht oder falsch kopiert; neues Token in Integration (Reparatur-Hinweis) **und** am Display (Touch 3 s halten) eintragen |
+| Touch trifft daneben | Beim Einschalten 3 s halten und neu kalibrieren |
+| Punkt in der Karte bleibt grau | Display nicht verbunden (Sensor „Verbunden“ in HA prüfen) |
 
-### Firmware
+## Selbst bauen
 
 ```bash
-cd firmware
-cp include/secrets.h.example include/secrets.h  # optional
-pio run
-# Binary: firmware/.pio/build/esp32/firmware.bin
+cd firmware && pio run            # Binary: .pio/build/esp32/firmware.bin
 ```
 
-Flash-Größe nach dem Kompilieren: ~75 % (1,47 MB / 1,97 MB), RAM: ~38 %.
+Die Fonts (Montserrat mit Latin-1 und €) liegen fertig in `firmware/src/fonts/`; neu erzeugen mit `python firmware/tools/gen_fonts.py`.
 
-### Integration testen
+Tests:
 
 ```bash
-cd custom_components
-python -m pytest  # sofern pytest-homeassistant-custom-component installiert
+pip install pytest-homeassistant-custom-component && pytest          # Integration
+pip install playwright && python tests/browser/run.py                # Karte (Chrome)
 ```
-
----
-
-## Anforderungen
-
-- Home Assistant ≥ 2025.4.0
-- HACS (für automatische Installation)
-- ESP32-WROOM-32D mit ILI9488 480×320 + XPT2046 (siehe Pinbelegung oben)
-
----
 
 ## Lizenz
 

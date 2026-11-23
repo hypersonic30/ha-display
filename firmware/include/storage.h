@@ -11,4 +11,7 @@ struct Config {
 
 bool  storage_load(Config &cfg);
 void  storage_save(const Config &cfg);
-void  storage_clear();
+
+// XPT2046 calibration data (5 x uint16_t, see TFT_eSPI::calibrateTouch)
+bool  storage_load_touch(uint16_t cal[5]);
+void  storage_save_touch(const uint16_t cal[5]);

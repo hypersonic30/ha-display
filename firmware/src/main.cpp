@@ -1,6 +1,5 @@
 #include <Arduino.h>
 #include <WiFi.h>
-#include <HTTPClient.h>
 #include <TFT_eSPI.h>
 #include <lvgl.h>
 
@@ -10,11 +9,17 @@
 #include "ha_client.h"
 #include "widgets.h"
 
-// ── Display & LVGL ────────────────────────────────────────────────────────────
+// ── Display, touch & LVGL ─────────────────────────────────────────────────────
+
+static const int DEFAULT_BRIGHTNESS = 86;   // percent, until the layout says otherwise
+static const uint32_t HOLD_MS       = 3000;
 
 TFT_eSPI tft = TFT_eSPI();
 static lv_disp_draw_buf_t draw_buf;
-static lv_color_t         buf[LV_HOR_RES_MAX * 10];
+static lv_color_t         buf[LV_HOR_RES_MAX * 32];
+
+static uint16_t touch_x = 0, touch_y = 0;
+static uint32_t press_since = 0;   // 0 = not pressed
 
 static void disp_flush(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *color_p) {
     tft.startWrite();
@@ -29,20 +34,75 @@ static void disp_flush(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *co
 
 static void touch_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {
     uint16_t x, y;
-    data->state = tft.getTouch(&x, &y) ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
-    data->point.x = x;
-    data->point.y = y;
+    if (tft.getTouch(&x, &y)) {
+        touch_x = x;
+        touch_y = y;
+        if (!press_since) press_since = millis() ? millis() : 1;
+        data->state = LV_INDEV_STATE_PRESSED;
+    } else {
+        press_since = 0;
+        data->state = LV_INDEV_STATE_RELEASED;
+    }
+    data->point.x = touch_x;
+    data->point.y = touch_y;
 }
 
-static void display_init() {
+static uint32_t touch_hold_ms() {
+    return press_since ? millis() - press_since : 0;
+}
+
+static void set_brightness(int percent) {
+    percent = constrain(percent, 1, 100);
+    ledcWrite(TFT_BL, percent * 255 / 100);
+}
+
+static void tft_init() {
     tft.begin();
     tft.setRotation(1);
     tft.fillScreen(TFT_BLACK);
     ledcAttach(TFT_BL, 5000, 8);
-    ledcWrite(TFT_BL, 220);
+    set_brightness(DEFAULT_BRIGHTNESS);
+}
 
+// Held for HOLD_MS right after power-up: calibrate the touch again.
+static bool boot_hold_requested() {
+    tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    tft.drawCentreString("Touch 3 s halten: Touch neu kalibrieren", 240, 150, 2);
+
+    uint32_t t0 = millis(), held = 0;
+    uint16_t x, y;
+    while (millis() - t0 < HOLD_MS + 1000) {
+        if (tft.getTouch(&x, &y)) {
+            if (!held) held = millis();
+            if (millis() - held >= HOLD_MS) return true;
+        } else if (held) {
+            return false;                        // released early
+        } else if (millis() - t0 > 800) {
+            return false;                        // nobody is touching
+        }
+        delay(10);
+    }
+    return false;
+}
+
+static void touch_init() {
+    uint16_t cal[5];
+    bool have = storage_load_touch(cal);
+    if (have) tft.setTouch(cal);
+
+    bool recalibrate = boot_hold_requested();
+    if (!have || recalibrate) {
+        tft.fillScreen(TFT_BLACK);
+        tft.calibrateTouch(cal, TFT_MAGENTA, TFT_BLACK, 15);
+        storage_save_touch(cal);
+        tft.setTouch(cal);
+    }
+    tft.fillScreen(TFT_BLACK);
+}
+
+static void lvgl_init() {
     lv_init();
-    lv_disp_draw_buf_init(&draw_buf, buf, NULL, LV_HOR_RES_MAX * 10);
+    lv_disp_draw_buf_init(&draw_buf, buf, NULL, LV_HOR_RES_MAX * 32);
 
     static lv_disp_drv_t disp_drv;
     lv_disp_drv_init(&disp_drv);
@@ -64,26 +124,9 @@ static void display_init() {
 static char ap_ssid[32];
 
 static void build_ap_ssid() {
-    uint8_t mac[6];
-    WiFi.macAddress(mac);
-    snprintf(ap_ssid, sizeof(ap_ssid), "ESP32-Display-%02X%02X", mac[4], mac[5]);
-}
-
-// ── HA connection test ────────────────────────────────────────────────────────
-
-static bool ha_reachable(const Config &cfg) {
-    char url[160];
-    snprintf(url, sizeof(url), "%s/api/", cfg.ha_url);
-    char auth[540];
-    snprintf(auth, sizeof(auth), "Bearer %s", cfg.ha_token);
-
-    HTTPClient http;
-    http.begin(url);
-    http.addHeader("Authorization", auth);
-    int code = http.GET();
-    http.end();
-    Serial.printf("[HA] GET %s → %d\n", url, code);
-    return code == 200 || code == 201;
+    uint64_t mac = ESP.getEfuseMac();   // valid before WiFi is started
+    snprintf(ap_ssid, sizeof(ap_ssid), "ESP32-Display-%02X%02X",
+             (unsigned)((mac >> 32) & 0xFF), (unsigned)((mac >> 40) & 0xFF));
 }
 
 // ── State machine ─────────────────────────────────────────────────────────────
@@ -91,84 +134,139 @@ static bool ha_reachable(const Config &cfg) {
 enum State { PROVISIONING, CONNECTING_WIFI, TESTING_HA, RUNNING };
 static State  state;
 static Config cfg;
+
 static uint32_t connect_start;
-static uint8_t  wifi_retries;
+static bool     wifi_fail_shown;
+static uint32_t next_ha_try;
+static bool     ha_fail_shown;
+static HaStatus last_ha_status;
+
+static bool    status_screen = false;  // a screen without widgets: hold touch -> setup
+static int32_t built_rev     = -1;     // layout revision currently on screen
+
+static void screen_connecting(const char *msg) {
+    status_screen = true;
+    built_rev = -1;
+    ui_show_connecting(msg);
+}
+
+static void screen_error(const char *msg) {
+    status_screen = true;
+    built_rev = -1;
+    ui_show_error(msg);
+    Serial.printf("[ERROR] %s\n", msg);
+}
 
 static void enter_provisioning() {
+    ha_client_stop();
+    WiFi.disconnect();
     state = PROVISIONING;
-    build_ap_ssid();
+    status_screen = false;
+    built_rev = -1;
     provisioning_begin(ap_ssid);
-    ui_show_provisioning(ap_ssid, "192.168.4.1");
-    Serial.printf("[STATE] → PROVISIONING  SSID: %s\n", ap_ssid);
+    ui_show_provisioning(ap_ssid, provisioning_ap_pass(), "192.168.4.1");
+    Serial.printf("[STATE] -> PROVISIONING  SSID: %s\n", ap_ssid);
+}
+
+static void wifi_begin() {
+    WiFi.disconnect();
+    WiFi.begin(cfg.wifi_ssid, cfg.wifi_pass);
+    connect_start = millis();
 }
 
 static void enter_connecting_wifi() {
     state = CONNECTING_WIFI;
-    provisioning_end();
-    WiFi.begin(cfg.wifi_ssid, cfg.wifi_pass);
-    connect_start = millis();
-    wifi_retries  = 0;
-    ui_show_connecting("Verbinde mit WLAN...");
-    Serial.printf("[STATE] → CONNECTING_WIFI  SSID: %s\n", cfg.wifi_ssid);
+    wifi_fail_shown = false;
+    wifi_begin();
+    screen_connecting("Verbinde mit WLAN...");
+    Serial.printf("[STATE] -> CONNECTING_WIFI  SSID: %s\n", cfg.wifi_ssid);
 }
 
 static void enter_testing_ha() {
     state = TESTING_HA;
-    ui_show_connecting("Prüfe Home Assistant...");
-    Serial.printf("[STATE] → TESTING_HA  %s\n", cfg.ha_url);
+    ha_fail_shown = false;
+    next_ha_try = 0;
+    screen_connecting("Prüfe Home Assistant...");
+    Serial.printf("[STATE] -> TESTING_HA  %s\n", cfg.ha_url);
 }
 
-// ── Entity state callback ─────────────────────────────────────────────────────
+// ── HA callbacks ──────────────────────────────────────────────────────────────
 
-static void on_entity_state(const char *entity_id, const char *state_val,
-                             JsonObjectConst attributes) {
-    Serial.printf("[STATE] %s = %s\n", entity_id, state_val);
-    widgets_update(entity_id, state_val, attributes);
+static void on_entity_state(const char *entity_id, const char *state_val) {
+    widgets_update(entity_id, state_val);
 }
 
-// ── Layout callback ───────────────────────────────────────────────────────────
+static void on_layout(JsonObjectConst ev) {
+    int brightness = ev["settings"]["brightness"] | 0;
+    if (brightness > 0) set_brightness(brightness);
 
-static void on_layout(JsonArrayConst widgets) {
-    // Build LVGL widgets
-    widgets_build(widgets);
+    JsonArrayConst widgets = ev["widgets"].as<JsonArrayConst>();
+    int32_t rev = ev["rev"] | 0;
+    if (rev != built_rev) {
+        int n = widgets_build(widgets, ev["name"] | cfg.device_name);
+        built_rev = rev;
+        status_screen = (n == 0);
+    }
 
-    // Collect entity IDs and subscribe to state changes
+    // The subscription must be renewed after every (re)connect, even for an unchanged layout.
     static const char *entity_ids[32];
     static char        entity_buf[32][64];
     size_t count = 0;
-
     for (JsonObjectConst w : widgets) {
         const char *eid = w["entity"] | "";
-        if (eid[0] && count < 32) {
-            strlcpy(entity_buf[count], eid, 64);
-            entity_ids[count] = entity_buf[count];
-            count++;
-        }
+        if (!eid[0] || count >= 32) continue;
+        bool dup = false;
+        for (size_t i = 0; i < count; i++) dup |= strcmp(entity_buf[i], eid) == 0;
+        if (dup) continue;
+        strlcpy(entity_buf[count], eid, sizeof(entity_buf[0]));
+        entity_ids[count] = entity_buf[count];
+        count++;
     }
-    if (count) ha_client_subscribe(entity_ids, count);
+    ha_client_subscribe(entity_ids, count);
 }
 
 static void enter_running() {
     state = RUNNING;
-    storage_save(cfg);
+    status_screen = true;
+    built_rev = -1;
+    last_ha_status = HA_CONNECTING;
     ui_show_running(cfg.device_name, cfg.ha_url);
     ha_client_begin(cfg, on_entity_state, on_layout);
-    Serial.println("[STATE] → RUNNING");
+    Serial.println("[STATE] -> RUNNING");
 }
 
-static void enter_error(const char *msg, bool clear_storage = false) {
-    if (clear_storage) storage_clear();
-    ui_show_error(msg);
-    Serial.printf("[ERROR] %s\n", msg);
-    delay(4000);
-    ESP.restart();
+static void check_ha_status() {
+    HaStatus st = ha_client_status();
+    if (st == last_ha_status) return;
+    last_ha_status = st;
+
+    char msg[160];
+    switch (st) {
+    case HA_AUTH_FAILED:
+        screen_error("Token ungültig.\nIn Home Assistant einen neuen Langzeit-Zugriffstoken erstellen.");
+        break;
+    case HA_DEVICE_UNKNOWN:
+        snprintf(msg, sizeof(msg), "Gerät '%s' ist in Home Assistant nicht angelegt.\n"
+                 "Unter der Integration 'ESP32 Display' ein Gerät mit diesem Namen hinzufügen.",
+                 cfg.device_name);
+        screen_error(msg);
+        break;
+    case HA_PROTOCOL_ERROR:
+        snprintf(msg, sizeof(msg), "Home Assistant lehnt die Verbindung ab:\n%s", ha_client_error());
+        screen_error(msg);
+        break;
+    default:
+        break;   // CONNECTING keeps whatever is on screen, OK is shown by the layout itself
+    }
 }
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
 
 void setup() {
     Serial.begin(115200);
-    display_init();
+    tft_init();
+    touch_init();
+    lvgl_init();
     ui_init();
     build_ap_ssid();
 
@@ -186,12 +284,21 @@ void setup() {
 void loop() {
     lv_task_handler();
 
+    if (state != PROVISIONING && status_screen && touch_hold_ms() >= HOLD_MS) {
+        press_since = 0;
+        enter_provisioning();
+        delay(5);
+        return;
+    }
+
     switch (state) {
 
     case PROVISIONING:
         provisioning_handle();
         if (provisioning_done()) {
             cfg = provisioning_config();
+            storage_save(cfg);
+            provisioning_end();
             enter_connecting_wifi();
         }
         break;
@@ -201,22 +308,42 @@ void loop() {
             Serial.printf("[WIFI] Connected, IP: %s\n", WiFi.localIP().toString().c_str());
             enter_testing_ha();
         } else if (millis() - connect_start > 20000) {
-            // Timeout — back to provisioning (don't clear storage, let user correct)
-            WiFi.disconnect();
-            enter_error("WLAN-Verbindung fehlgeschlagen.\nZurück zur Einrichtung.", true);
+            if (!wifi_fail_shown) {
+                char msg[128];
+                snprintf(msg, sizeof(msg), "WLAN '%s' nicht erreichbar.\nNeuer Versuch läuft...",
+                         cfg.wifi_ssid);
+                screen_error(msg);
+                wifi_fail_shown = true;
+            }
+            wifi_begin();
         }
         break;
 
     case TESTING_HA:
-        if (ha_reachable(cfg)) {
-            enter_running();
-        } else {
-            enter_error("Home Assistant nicht erreichbar.\nURL oder Token prüfen.", true);
+        if (WiFi.status() != WL_CONNECTED) { enter_connecting_wifi(); break; }
+        if (millis() < next_ha_try) break;
+        {
+            int code = ha_check(cfg);
+            if (code == 200 || code == 201) {
+                enter_running();
+            } else if (code == 401 || code == 403) {
+                // No retries: a wrong token must not hammer HA (IP ban)
+                next_ha_try = UINT32_MAX;
+                screen_error(code == 401 ? "Token ungültig.\nIn Home Assistant einen neuen Langzeit-Zugriffstoken erstellen."
+                                         : "Home Assistant verweigert den Zugriff (IP gesperrt?).");
+            } else {
+                if (!ha_fail_shown) {
+                    screen_error("Home Assistant nicht erreichbar.\nURL prüfen. Neuer Versuch läuft...");
+                    ha_fail_shown = true;
+                }
+                next_ha_try = millis() + 10000;
+            }
         }
         break;
 
     case RUNNING:
         ha_client_tick();
+        check_ha_status();
         break;
     }
 

@@ -2,6 +2,12 @@
 #include <lvgl.h>
 #include <ArduinoJson.h>
 
-void widgets_build(JsonArrayConst layout);
-void widgets_update(const char *entity_id, const char *state, JsonObjectConst attrs);
-void widgets_clear();
+// Rebuilds the whole screen from the layout; returns the number of widgets.
+// With an empty layout a hint with `device_name` is shown instead.
+int  widgets_build(JsonArrayConst layout, const char *device_name);
+
+void widgets_update(const char *entity_id, const char *state);
+
+// Forget all widget handles without deleting objects. Must be called whenever
+// something else cleans the screen (ui.cpp does so before drawing a status screen).
+void widgets_reset();

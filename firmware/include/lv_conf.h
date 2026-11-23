@@ -15,9 +15,13 @@
 /* DPI (pixels per inch) */
 #define LV_DPI_DEF 130
 
-/* Memory */
-#define LV_MEM_CUSTOM 0
-#define LV_MEM_SIZE (48U * 1024U)
+/* Memory: use the ESP32 heap (32 widgets x several objects outgrow a fixed pool) */
+#define LV_MEM_CUSTOM 1
+
+/* Without a tick source LVGL's timers (screen refresh, animations) never fire */
+#define LV_TICK_CUSTOM 1
+#define LV_TICK_CUSTOM_INCLUDE "Arduino.h"
+#define LV_TICK_CUSTOM_SYS_TIME_EXPR (millis())
 
 /* Log */
 #define LV_USE_LOG 1
@@ -52,11 +56,8 @@
 #define LV_USE_SPAN       0
 
 /* Fonts */
-#define LV_FONT_MONTSERRAT_12 1
+/* UI fonts with Latin-1 + Euro live in src/fonts (ui_font_NN); only the theme default stays built in */
 #define LV_FONT_MONTSERRAT_14 1
-#define LV_FONT_MONTSERRAT_16 1
-#define LV_FONT_MONTSERRAT_20 1
-#define LV_FONT_MONTSERRAT_24 1
 #define LV_FONT_DEFAULT &lv_font_montserrat_14
 
 /* Themes */

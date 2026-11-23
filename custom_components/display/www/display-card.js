@@ -1,631 +1,512 @@
-// ESP32 Display Card — Visual Layout Editor
-// Communicates with /api/display/layout/{device} and /api/display/devices
+// ESP32 Display card: visual layout editor for the panels set up in the "ESP32 Display" integration.
+// Talks to Home Assistant only through the integration's WebSocket commands (display/...).
 
-const CARD_VERSION = "0.1.0";
+const CARD_VERSION = "0.2.0";
+const SCREEN_W = 480, SCREEN_H = 320, GRID = 5, MAX_WIDGETS = 32, MIN_SIZE = 20;
 
-const WIDGET_TYPES = ["label", "button", "gauge", "switch", "bar"];
-const WIDGET_DEFAULTS = {
-  label:  { w: 180, h: 70,  label: "", unit: "" },
-  button: { w: 130, h: 80,  label: "", service_domain: "homeassistant" },
-  gauge:  { w: 150, h: 150, label: "", unit: "", min: 0, max: 100 },
-  switch: { w: 170, h: 60,  label: "", service_domain: "homeassistant" },
-  bar:    { w: 210, h: 60,  label: "", unit: "%", min: 0, max: 100 },
+const TYPES = {
+  label:  { icon: "Aa", name: "Wert",     w: 180, h: 70,  domains: null },
+  button: { icon: "▣",  name: "Taster",   w: 130, h: 80,  domains: ["light", "switch", "input_boolean", "automation", "script", "scene", "button", "input_button", "fan", "cover"] },
+  gauge:  { icon: "◔",  name: "Anzeige",  w: 150, h: 150, domains: ["sensor", "input_number", "number"] },
+  switch: { icon: "⇆",  name: "Schalter", w: 170, h: 60,  domains: ["light", "switch", "input_boolean", "fan", "automation"] },
+  bar:    { icon: "▬",  name: "Balken",   w: 210, h: 60,  domains: ["sensor", "input_number", "number"] },
 };
 
-// Display physical resolution
-const DW = 480, DH = 320;
-
-// ── Styles ────────────────────────────────────────────────────────────────────
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const snap = (v) => Math.round(v / GRID) * GRID;
+const num = (v, fallback) => (Number.isFinite(parseFloat(v)) ? parseFloat(v) : fallback);
 
 const STYLE = `
-  :host { display: block; font-family: var(--paper-font-body1_-_font-family, sans-serif); }
-  * { box-sizing: border-box; }
-
-  .root { background: var(--card-background-color); border-radius: 12px; overflow: hidden; }
-
-  /* Toolbar */
-  .toolbar {
-    display: flex; align-items: center; gap: 10px; padding: 12px 16px;
-    border-bottom: 1px solid var(--divider-color);
-  }
-  .toolbar select {
-    flex: 1; background: var(--secondary-background-color);
-    border: 1px solid var(--divider-color); border-radius: 8px;
-    color: var(--primary-text-color); padding: 6px 10px; font-size: 14px;
-  }
-  .btn {
-    border: none; border-radius: 8px; padding: 7px 14px; cursor: pointer;
-    font-size: 13px; font-weight: 500;
-  }
-  .btn-primary { background: var(--primary-color); color: #fff; }
-  .btn-secondary { background: var(--secondary-background-color); color: var(--primary-text-color); }
-  .btn-danger { background: #ef5350; color: #fff; }
-  .btn:disabled { opacity: .45; cursor: not-allowed; }
-
-  /* Layout */
-  .body { display: flex; gap: 0; }
-
-  /* Palette */
-  .palette {
-    width: 100px; padding: 10px 8px; border-right: 1px solid var(--divider-color);
-    display: flex; flex-direction: column; gap: 6px; flex-shrink: 0;
-  }
-  .palette-item {
-    background: var(--secondary-background-color); border: 1px solid var(--divider-color);
-    border-radius: 8px; padding: 7px 4px; text-align: center; cursor: grab;
-    font-size: 12px; color: var(--primary-text-color); user-select: none;
-  }
-  .palette-item:active { cursor: grabbing; opacity: .7; }
-  .palette-label { font-size: 11px; color: var(--secondary-text-color); margin-top: 2px; }
-
-  /* Canvas area */
-  .canvas-wrap {
-    flex: 1; display: flex; align-items: flex-start; justify-content: center;
-    padding: 16px; overflow: auto; background: var(--secondary-background-color);
-  }
-  .canvas {
-    position: relative; background: #0f0f1a; border-radius: 8px;
-    box-shadow: 0 4px 20px rgba(0,0,0,.4); flex-shrink: 0;
-  }
-  .canvas-inner { position: absolute; inset: 0; overflow: hidden; }
-
-  /* Widgets on canvas */
-  .w {
-    position: absolute; background: #1a1a2e; border-radius: 8px;
-    border: 2px solid transparent; cursor: grab; overflow: hidden;
-    display: flex; flex-direction: column; padding: 6px 8px;
-  }
-  .w:hover { border-color: rgba(79,195,247,.4); }
-  .w.selected { border-color: #4fc3f7 !important; }
-  .w:active { cursor: grabbing; }
-  .w-title { font-size: 10px; color: #778899; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .w-value { font-size: 16px; color: #e0e0e0; margin-top: auto; }
-  .w-type  { font-size: 9px; color: #4fc3f7; text-transform: uppercase; letter-spacing: .5px; }
-
-  /* Button preview */
-  .w.type-button { background: #2a2a44; align-items: center; justify-content: center; }
-  .w.type-button .w-value { font-size: 13px; text-align: center; margin: 0; }
-
-  /* Gauge preview */
-  .w.type-gauge { align-items: center; justify-content: center; }
-  .w-gauge-arc {
-    width: 70%; aspect-ratio: 1; border-radius: 50%;
-    border: 5px solid #2a2a44; border-top-color: #4fc3f7; border-right-color: #4fc3f7;
-    margin: 4px auto;
-  }
-
-  /* Switch preview */
-  .w-switch-row { display: flex; justify-content: space-between; align-items: center; margin-top: auto; }
-  .w-switch-pill {
-    width: 36px; height: 20px; background: #2a2a44; border-radius: 10px; position: relative;
-  }
-  .w-switch-pill::after {
-    content: ''; position: absolute; width: 14px; height: 14px; background: #778899;
-    border-radius: 50%; top: 3px; left: 3px; transition: .2s;
-  }
-
-  /* Bar preview */
-  .w-bar-track { height: 8px; background: #2a2a44; border-radius: 4px; margin-top: auto; }
-  .w-bar-fill  { height: 100%; background: #4fc3f7; border-radius: 4px; width: 50%; }
-
-  /* Properties panel */
-  .props {
-    width: 220px; padding: 14px; border-left: 1px solid var(--divider-color);
-    overflow-y: auto; flex-shrink: 0;
-  }
-  .props-empty { color: var(--secondary-text-color); font-size: 13px; text-align: center; padding-top: 24px; }
-  .props h3 { margin: 0 0 12px; font-size: 13px; color: var(--primary-text-color); }
-  .field { margin-bottom: 10px; }
-  .field label { display: block; font-size: 11px; color: var(--secondary-text-color); margin-bottom: 3px; }
-  .field input, .field select {
-    width: 100%; background: var(--secondary-background-color);
-    border: 1px solid var(--divider-color); border-radius: 6px;
-    color: var(--primary-text-color); padding: 6px 8px; font-size: 13px;
-  }
-  .field-row { display: flex; gap: 6px; }
-  .field-row .field { flex: 1; }
-  .props-actions { margin-top: 14px; display: flex; flex-direction: column; gap: 6px; }
-
-  .toast {
-    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
-    background: #333; color: #fff; padding: 10px 20px; border-radius: 8px;
-    font-size: 13px; z-index: 9999; opacity: 0; transition: opacity .3s;
-    pointer-events: none;
-  }
-  .toast.show { opacity: 1; }
+:host { display: block; }
+* { box-sizing: border-box; }
+.root { background: var(--card-background-color); border-radius: var(--ha-card-border-radius, 12px); overflow: hidden; color: var(--primary-text-color); font-family: var(--paper-font-body1_-_font-family, sans-serif); }
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--divider-color); }
+.bar select, .field input, .field select { background: var(--secondary-background-color); color: var(--primary-text-color); border: 1px solid var(--divider-color); border-radius: 8px; padding: 7px 9px; font-size: 14px; min-width: 0; }
+.bar select { flex: 1 1 140px; }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--disabled-text-color); flex: none; }
+.dot.on { background: var(--success-color, #43a047); }
+.btn { border: 0; border-radius: 8px; padding: 8px 14px; font-size: 13px; font-weight: 500; cursor: pointer; background: var(--secondary-background-color); color: var(--primary-text-color); }
+.btn.primary { background: var(--primary-color); color: var(--text-primary-color, #fff); }
+.btn.danger { background: var(--error-color, #db4437); color: #fff; }
+.btn:disabled { opacity: .45; cursor: default; }
+.setup { padding: 12px 14px; border-bottom: 1px solid var(--divider-color); background: var(--secondary-background-color); font-size: 13px; }
+.setup .row { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
+.setup input { flex: 1; min-width: 0; font-family: monospace; }
+.setup .hint { color: var(--secondary-text-color); margin: 0 0 4px; }
+.body { display: flex; flex-wrap: wrap; }
+.palette { display: flex; flex-direction: column; gap: 6px; padding: 12px 10px; width: 104px; border-right: 1px solid var(--divider-color); }
+.pi { text-align: center; padding: 8px 2px; border: 1px solid var(--divider-color); border-radius: 8px; cursor: grab; user-select: none; background: var(--secondary-background-color); font-size: 12px; }
+.pi b { display: block; font-size: 18px; font-weight: 500; }
+.stage { flex: 1 1 360px; min-width: 0; padding: 14px; background: var(--secondary-background-color); display: flex; justify-content: center; align-items: flex-start; }
+.screen { position: relative; flex: none; background: #0f0f1a; border-radius: 6px; box-shadow: 0 3px 16px rgba(0,0,0,.45); overflow: hidden; outline: none; touch-action: none; }
+.screen:focus-visible { box-shadow: 0 0 0 2px var(--primary-color); }
+.canvas { position: absolute; left: 0; top: 0; width: ${SCREEN_W}px; height: ${SCREEN_H}px; transform-origin: 0 0;
+  background-image: radial-gradient(#ffffff14 1px, transparent 1px); background-size: ${GRID * 4}px ${GRID * 4}px; }
+.w { position: absolute; background: #1a1a2e; border-radius: 10px; border: 2px solid transparent; padding: 8px; overflow: hidden; cursor: grab; touch-action: none; user-select: none; color: #e0e0e0; font-family: sans-serif; }
+.w.sel { border-color: #4fc3f7; }
+.w .t { font-size: 12px; color: #777799; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+.w .v { font-size: 20px; position: absolute; left: 8px; bottom: 6px; right: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+.w.button { background: #2a2a44; text-align: center; } .w.button.on { background: #4fc3f7; color: #0f0f1a; }
+.w.button .v { position: static; text-align: center; font-size: 16px; display: flex; align-items: center; justify-content: center; height: 100%; }
+.w.gauge .t { text-align: center; } .w.gauge .v { text-align: center; bottom: auto; top: 50%; transform: translateY(-40%); }
+.ring { position: absolute; left: 50%; top: 54%; transform: translate(-50%, -50%); border-radius: 50%; pointer-events: none; }
+.ring::after { content: ""; position: absolute; inset: 7px; border-radius: 50%; background: #1a1a2e; }
+.w.switch .t { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); max-width: 55%; }
+.pill { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); width: 50px; height: 25px; border-radius: 13px; background: #2a2a44; pointer-events: none; }
+.pill::after { content: ""; position: absolute; top: 3px; left: 3px; width: 19px; height: 19px; border-radius: 50%; background: #777799; transition: left .15s; }
+.pill.on { background: #4fc3f7; } .pill.on::after { left: 28px; background: #fff; }
+.w.bar .v { top: 6px; bottom: auto; left: auto; font-size: 14px; color: #777799; }
+.track { position: absolute; left: 8px; right: 8px; bottom: 8px; height: 12px; border-radius: 6px; background: #2a2a44; pointer-events: none; }
+.track i { display: block; height: 100%; border-radius: 6px; background: #4fc3f7; }
+.rz { position: absolute; right: 0; bottom: 0; width: 18px; height: 18px; cursor: nwse-resize; touch-action: none; }
+.rz::after { content: ""; position: absolute; right: 3px; bottom: 3px; width: 8px; height: 8px; border-right: 2px solid #4fc3f7; border-bottom: 2px solid #4fc3f7; }
+.props { flex: 0 0 230px; padding: 14px; border-left: 1px solid var(--divider-color); }
+.props h3 { margin: 0 0 10px; font-size: 14px; }
+.empty { color: var(--secondary-text-color); font-size: 13px; line-height: 1.5; }
+.field { margin-bottom: 9px; } .field label { display: block; font-size: 11px; color: var(--secondary-text-color); margin-bottom: 3px; } .field input, .field select { width: 100%; }
+.two { display: flex; gap: 6px; } .two .field { flex: 1; }
+.msg { margin: 10px 14px; padding: 8px 10px; border-radius: 8px; font-size: 13px; background: var(--secondary-background-color); }
+.msg.err { background: var(--error-color, #db4437); color: #fff; }
+@media (max-width: 700px) { .palette { flex-direction: row; width: 100%; border-right: 0; border-bottom: 1px solid var(--divider-color); overflow-x: auto; } .pi { flex: 1 0 70px; } .props { flex: 1 1 100%; border-left: 0; border-top: 1px solid var(--divider-color); } }
 `;
 
-// ── Widget preview HTML ───────────────────────────────────────────────────────
-
-function widgetPreviewHtml(w) {
-  const title = w.label || w.entity || w.type;
-  switch (w.type) {
-    case "button":
-      return `<div class="w-title w-type">${w.type}</div><div class="w-value">${title}</div>`;
-    case "gauge":
-      return `<div class="w-title">${title}</div><div class="w-gauge-arc"></div><div class="w-value" style="font-size:12px">--${w.unit||""}</div>`;
-    case "switch":
-      return `<div class="w-title">${title}</div><div class="w-switch-row"><span class="w-value" style="font-size:12px">--</span><div class="w-switch-pill"></div></div>`;
-    case "bar":
-      return `<div class="w-title">${title}</div><span class="w-value" style="font-size:12px">-- ${w.unit||""}</span><div class="w-bar-track"><div class="w-bar-fill"></div></div>`;
-    default: // label
-      return `<div class="w-title">${title}</div><div class="w-value">-- ${w.unit||""}</div>`;
-  }
-}
-
-// ── Main card class ───────────────────────────────────────────────────────────
-
 class DisplayCard extends HTMLElement {
+  static getConfigElement() { return document.createElement("display-card-editor"); }
+  static getStubConfig() { return {}; }
+
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
-    this._hass    = null;
-    this._config  = {};
-    this._layout  = { widgets: [] };
-    this._device  = "";
+    this._config = {};
     this._devices = [];
-    this._selected = null;   // widget id
-    this._scale   = 1;
-    this._idSeq   = 0;
-    this._dirty   = false;
+    this._deviceId = null;
+    this._widgets = [];
+    this._selected = null;
+    this._dirty = false;
+    this._scale = 1;
+    this._sig = "";
   }
 
-  set hass(h) {
-    this._hass = h;
-    if (!this._rendered) this._render();
+  setConfig(config) { this._config = config || {}; }
+  getCardSize() { return 8; }
+
+  set hass(hass) {
+    const first = !this._hass;
+    this._hass = hass;
+    if (first) this._init();
+    else this._refreshValues();
   }
 
-  setConfig(config) {
-    this._config = config || {};
-    this._device = config.device || "";
-  }
+  // ── Startup ───────────────────────────────────────────────────────────────
 
-  getCardSize() { return 7; }
-
-  // ── Render shell ────────────────────────────────────────────────────────────
-
-  _render() {
-    this._rendered = true;
-    this.shadowRoot.innerHTML = `
-      <style>${STYLE}</style>
-      <div class="root">
-        <div class="toolbar">
-          <select id="dev-sel"></select>
-          <button class="btn btn-secondary" id="btn-refresh" title="Neu laden">↻</button>
-          <button class="btn btn-primary" id="btn-save" disabled>Speichern</button>
-        </div>
-        <div class="body">
-          <div class="palette">
-            <div style="font-size:11px;color:var(--secondary-text-color);margin-bottom:4px">Widgets</div>
-            ${WIDGET_TYPES.map(t => `
-              <div class="palette-item" draggable="true" data-wtype="${t}" title="${t} hinzufügen">
-                ${this._typeIcon(t)}
-                <div class="palette-label">${t}</div>
-              </div>`).join("")}
-          </div>
-          <div class="canvas-wrap" id="canvas-wrap">
-            <div class="canvas" id="canvas">
-              <div class="canvas-inner" id="canvas-inner"></div>
-            </div>
-          </div>
-          <div class="props" id="props">
-            <div class="props-empty">Widget auswählen oder aus der Palette ziehen</div>
-          </div>
-        </div>
-      </div>
-      <div class="toast" id="toast"></div>`;
-
-    this._setupCanvas();
-    this._setupToolbar();
-    this._setupPalette();
-    this._loadDevices();
-  }
-
-  _typeIcon(t) {
-    return { label:"Aa", button:"⬛", gauge:"◉", switch:"⇌", bar:"▬" }[t] || "?";
-  }
-
-  // ── Canvas scaling ──────────────────────────────────────────────────────────
-
-  _setupCanvas() {
-    const wrap  = this.shadowRoot.getElementById("canvas-wrap");
-    const canvas = this.shadowRoot.getElementById("canvas");
-
-    const resize = () => {
-      const avail = wrap.clientWidth - 32;
-      this._scale = Math.min(1, avail / DW);
-      canvas.style.width  = (DW * this._scale) + "px";
-      canvas.style.height = (DH * this._scale) + "px";
-      const inner = this.shadowRoot.getElementById("canvas-inner");
-      inner.style.transform       = `scale(${this._scale})`;
-      inner.style.transformOrigin = "top left";
-      inner.style.width  = DW + "px";
-      inner.style.height = DH + "px";
-    };
-    new ResizeObserver(resize).observe(wrap);
-    setTimeout(resize, 50);
-
-    // Click on canvas background → deselect
-    this.shadowRoot.getElementById("canvas-inner").addEventListener("click", e => {
-      if (e.target === e.currentTarget) this._select(null);
-    });
-
-    // Drop from palette onto canvas
-    const inner = this.shadowRoot.getElementById("canvas-inner");
-    inner.addEventListener("dragover", e => e.preventDefault());
-    inner.addEventListener("drop", e => {
-      e.preventDefault();
-      const type = e.dataTransfer.getData("wtype");
-      if (!type) return;
-      const rect = inner.getBoundingClientRect();
-      const x = Math.round((e.clientX - rect.left) / this._scale);
-      const y = Math.round((e.clientY - rect.top)  / this._scale);
-      this._addWidget(type, x, y);
-    });
-  }
-
-  // ── Toolbar ─────────────────────────────────────────────────────────────────
-
-  _setupToolbar() {
-    this.shadowRoot.getElementById("btn-save").addEventListener("click", () => this._save());
-    this.shadowRoot.getElementById("btn-refresh").addEventListener("click", () => {
-      if (this._device) this._loadLayout(this._device);
-    });
-    this.shadowRoot.getElementById("dev-sel").addEventListener("change", e => {
-      this._device = e.target.value;
-      this._loadLayout(this._device);
-    });
-  }
-
-  // ── Palette drag ────────────────────────────────────────────────────────────
-
-  _setupPalette() {
-    this.shadowRoot.querySelectorAll(".palette-item").forEach(el => {
-      el.addEventListener("dragstart", e => {
-        e.dataTransfer.setData("wtype", el.dataset.wtype);
-      });
-      // Also click to add at center
-      el.addEventListener("click", () => {
-        this._addWidget(el.dataset.wtype, Math.round(DW / 2 - 60), Math.round(DH / 2 - 40));
-      });
-    });
-  }
-
-  // ── API calls ────────────────────────────────────────────────────────────────
-
-  _apiBase() { return `/api/display`; }
-
-  async _fetch(path, opts = {}) {
-    const r = await fetch(this._apiBase() + path, {
-      ...opts,
-      headers: {
-        "Authorization": `Bearer ${this._hass.auth.data.access_token}`,
-        "Content-Type": "application/json",
-        ...(opts.headers || {})
-      }
-    });
-    return r;
-  }
-
-  async _loadDevices() {
+  async _init() {
+    this.shadowRoot.innerHTML = `<style>${STYLE}</style><div class="root"><div class="msg">Lade …</div></div>`;
     try {
-      const r = await this._fetch("/devices");
-      const j = await r.json();
-      this._devices = j.devices || [];
-      // Also add device from config if set
-      if (this._device && !this._devices.includes(this._device))
-        this._devices.unshift(this._device);
-      this._renderDeviceSelect();
-      if (this._device) this._loadLayout(this._device);
-    } catch (e) {
-      this._toast("Geräte konnten nicht geladen werden");
+      this._devices = (await this._hass.callWS({ type: "display/devices" })).devices;
+    } catch (err) {
+      return this._fatal("Die Integration „ESP32 Display“ ist nicht eingerichtet oder nicht erreichbar.");
+    }
+    if (!this._devices.length) {
+      return this._fatal("Noch kein Display angelegt: Einstellungen → Geräte & Dienste → ESP32 Display → „Display hinzufügen“.");
+    }
+    const wanted = String(this._config.device || "").trim().toLowerCase();
+    const match = this._devices.find((d) => d.name.toLowerCase() === wanted || d.id === this._config.device);
+    this._deviceId = (match || this._devices[0]).id;
+    this._renderShell();
+    await this._load();
+  }
+
+  _fatal(text) {
+    this.shadowRoot.innerHTML = `<style>${STYLE}</style><div class="root"><div class="msg err">${esc(text)}</div></div>`;
+  }
+
+  _renderShell() {
+    const fixed = !!this._config.device && this._devices.some((d) => d.name.toLowerCase() === String(this._config.device).toLowerCase());
+    this.shadowRoot.innerHTML = `<style>${STYLE}</style>
+      <div class="root">
+        <div class="bar">
+          <span class="dot" id="dot" title="Display verbunden?"></span>
+          <select id="dev" ${fixed ? "disabled" : ""}>${this._devices.map((d) => `<option value="${esc(d.id)}">${esc(d.name)}</option>`).join("")}</select>
+          <button class="btn" id="setup">Einrichtung</button>
+          <button class="btn" id="reload" title="Gespeicherten Stand neu laden">↻</button>
+          <button class="btn primary" id="save" disabled>Speichern</button>
+        </div>
+        <div id="setupbox"></div>
+        <div id="msg"></div>
+        <div class="body">
+          <div class="palette">${Object.entries(TYPES).map(([t, d]) => `<div class="pi" draggable="true" data-type="${t}" title="Ziehen oder anklicken"><b>${d.icon}</b>${d.name}</div>`).join("")}</div>
+          <div class="stage"><div class="screen" id="screen" tabindex="0"><div class="canvas" id="canvas"></div></div></div>
+          <div class="props" id="props"></div>
+        </div>
+      </div>`;
+    const $ = (id) => this.shadowRoot.getElementById(id);
+    $("dev").value = this._deviceId;
+    $("dev").addEventListener("change", (e) => this._switchDevice(e.target.value));
+    $("save").addEventListener("click", () => this._save());
+    $("reload").addEventListener("click", () => this._reload());
+    $("setup").addEventListener("click", () => this._toggleSetup());
+    this.shadowRoot.querySelectorAll(".pi").forEach((el) => {
+      el.addEventListener("dragstart", (e) => e.dataTransfer.setData("text/plain", el.dataset.type));
+      el.addEventListener("click", () => this._add(el.dataset.type, 20, 20));
+    });
+    const screen = $("screen");
+    screen.addEventListener("dragover", (e) => e.preventDefault());
+    screen.addEventListener("drop", (e) => {
+      e.preventDefault();
+      const type = e.dataTransfer.getData("text/plain");
+      if (!TYPES[type]) return;
+      const r = screen.getBoundingClientRect();
+      this._add(type, (e.clientX - r.left) / this._scale - TYPES[type].w / 2, (e.clientY - r.top) / this._scale - TYPES[type].h / 2);
+    });
+    screen.addEventListener("pointerdown", (e) => { if (e.target === screen || e.target.id === "canvas") this._select(null); });
+    screen.addEventListener("keydown", (e) => this._key(e));
+    const stage = this.shadowRoot.querySelector(".stage");
+    new ResizeObserver(() => this._fit(stage)).observe(stage);
+    this._renderProps();
+  }
+
+  _fit(stage) {
+    const avail = stage.clientWidth - 28;
+    if (avail <= 0) return;
+    this._scale = Math.min(1.6, avail / SCREEN_W);
+    const screen = this.shadowRoot.getElementById("screen");
+    screen.style.width = `${SCREEN_W * this._scale}px`;
+    screen.style.height = `${SCREEN_H * this._scale}px`;
+    this.shadowRoot.getElementById("canvas").style.transform = `scale(${this._scale})`;
+  }
+
+  // ── Load / save ───────────────────────────────────────────────────────────
+
+  async _load() {
+    try {
+      const layout = await this._hass.callWS({ type: "display/layout/get", device_id: this._deviceId });
+      this._widgets = layout.widgets;
+      this._selected = null;
+      this._setDirty(false);
+      this._message("");
+      this._draw();
+      this._renderProps();
+      this._refreshDot();
+    } catch (err) {
+      this._message(`Layout konnte nicht geladen werden: ${err.message || err.code}`, true);
     }
   }
 
-  _renderDeviceSelect() {
-    const sel = this.shadowRoot.getElementById("dev-sel");
-    if (!this._devices.length) {
-      sel.innerHTML = `<option value="">Noch kein Layout gespeichert</option>`;
+  async _reload() {
+    if (this._dirty && !confirm("Ungespeicherte Änderungen verwerfen?")) return;
+    await this._load();
+  }
+
+  async _switchDevice(id) {
+    if (this._dirty && !confirm("Ungespeicherte Änderungen verwerfen?")) {
+      this.shadowRoot.getElementById("dev").value = this._deviceId;
       return;
     }
-    sel.innerHTML = this._devices
-      .map(d => `<option value="${esc(d)}" ${d === this._device ? "selected" : ""}>${esc(d)}</option>`)
-      .join("");
-  }
-
-  async _loadLayout(device) {
-    try {
-      const r = await this._fetch(`/layout/${encodeURIComponent(device)}`);
-      if (r.status === 404) {
-        this._layout = { device, widgets: [] };
-      } else {
-        this._layout = await r.json();
-      }
-      this._idSeq  = 0;
-      this._selected = null;
-      this._dirty  = false;
-      this._buildCanvas();
-      this._renderProps(null);
-      this._setSaveDirty(false);
-    } catch (e) {
-      this._toast("Layout konnte nicht geladen werden");
-    }
+    this._deviceId = id;
+    this.shadowRoot.getElementById("setupbox").innerHTML = "";
+    await this._load();
   }
 
   async _save() {
-    if (!this._device) {
-      this._toast("Kein Gerät ausgewählt");
-      return;
-    }
-    const btn = this.shadowRoot.getElementById("btn-save");
+    const btn = this.shadowRoot.getElementById("save");
     btn.disabled = true;
-    btn.textContent = "…";
     try {
-      const r = await this._fetch(`/layout/${encodeURIComponent(this._device)}`, {
-        method: "POST",
-        body: JSON.stringify({ widgets: this._layout.widgets })
-      });
-      if (r.ok) {
-        this._dirty = false;
-        this._setSaveDirty(false);
-        this._toast("Gespeichert ✓");
-        // Add to device list if new
-        if (!this._devices.includes(this._device)) {
-          this._devices.push(this._device);
-          this._renderDeviceSelect();
-        }
-      } else {
-        const j = await r.json();
-        this._toast("Fehler: " + (j.message || r.status));
-      }
-    } catch (e) {
-      this._toast("Speichern fehlgeschlagen");
+      const res = await this._hass.callWS({ type: "display/layout/set", device_id: this._deviceId, widgets: this._widgets });
+      this._widgets = res.widgets;
+      this._draw();
+      this._renderProps();
+      this._setDirty(false);
+      this._message("Gespeichert – das Display übernimmt das Layout sofort.");
+      setTimeout(() => this._message(""), 3000);
+    } catch (err) {
+      this._message(`Nicht gespeichert: ${err.message || err.code}`, true);
+      btn.disabled = false;
     }
-    btn.disabled = false;
-    btn.textContent = "Speichern";
   }
 
-  // ── Canvas rendering ─────────────────────────────────────────────────────────
-
-  _buildCanvas() {
-    const inner = this.shadowRoot.getElementById("canvas-inner");
-    inner.innerHTML = "";
-    this._layout.widgets.forEach(w => this._renderWidget(w));
+  _setDirty(dirty) {
+    this._dirty = dirty;
+    const btn = this.shadowRoot.getElementById("save");
+    if (btn) { btn.disabled = !dirty; btn.textContent = dirty ? "Speichern •" : "Speichern"; }
   }
 
-  _renderWidget(w) {
-    const inner = this.shadowRoot.getElementById("canvas-inner");
-    const el = document.createElement("div");
-    el.className = `w type-${w.type}${w.id === this._selected ? " selected" : ""}`;
-    el.dataset.id = w.id;
-    el.style.left   = w.x + "px";
-    el.style.top    = w.y + "px";
-    el.style.width  = w.w + "px";
-    el.style.height = w.h + "px";
-    el.innerHTML = widgetPreviewHtml(w);
-
-    // Select on click
-    el.addEventListener("click", e => { e.stopPropagation(); this._select(w.id); });
-
-    // Drag to move
-    this._makeDraggable(el, w);
-
-    inner.appendChild(el);
+  _message(text, error = false) {
+    const el = this.shadowRoot.getElementById("msg");
+    if (el) el.innerHTML = text ? `<div class="msg ${error ? "err" : ""}">${esc(text)}</div>` : "";
   }
 
-  _makeDraggable(el, w) {
-    let sx, sy, ox, oy;
-    el.addEventListener("pointerdown", e => {
-      if (e.button !== 0) return;
-      sx = e.clientX; sy = e.clientY;
-      ox = w.x; oy = w.y;
-      el.setPointerCapture(e.pointerId);
-      e.stopPropagation();
-    });
-    el.addEventListener("pointermove", e => {
-      if (!e.buttons) return;
-      const dx = Math.round((e.clientX - sx) / this._scale);
-      const dy = Math.round((e.clientY - sy) / this._scale);
-      w.x = Math.max(0, Math.min(DW - w.w, ox + dx));
-      w.y = Math.max(0, Math.min(DH - w.h, oy + dy));
-      el.style.left = w.x + "px";
-      el.style.top  = w.y + "px";
-      this._setSaveDirty(true);
-    });
-    el.addEventListener("pointerup", () => {
-      this._updatePropsPosition(w);
-    });
+  _refreshDot() {
+    const dev = this._devices.find((d) => d.id === this._deviceId);
+    const dot = this.shadowRoot.getElementById("dot");
+    if (!dev || !dot) return;
+    const sensor = Object.values(this._hass.states).find((s) => s.attributes.device_class === "connectivity" && s.entity_id.endsWith("_connected") && s.attributes.friendly_name?.startsWith(dev.name));
+    dot.classList.toggle("on", sensor ? sensor.state === "on" : dev.online);
   }
 
-  // ── Selection & properties panel ────────────────────────────────────────────
+  // ── Panel setup info (token of the integration) ───────────────────────────
+
+  async _toggleSetup() {
+    const box = this.shadowRoot.getElementById("setupbox");
+    if (box.innerHTML) { box.innerHTML = ""; return; }
+    try {
+      const info = await this._hass.callWS({ type: "display/setup_info", device_id: this._deviceId });
+      box.innerHTML = `<div class="setup">
+        <p class="hint">Ersteinrichtung am Display: mit dem WLAN „ESP32-Display-…“ verbinden (Passwort steht auf dem Display), dann http://192.168.4.1 öffnen und eintragen:</p>
+        ${[["Gerätename", info.name, "text"], ["Home-Assistant-URL", info.ha_url, "text"], ["Zugriffstoken (für alle Displays gleich)", info.token, "password"]].map(([label, value, type], i) => `
+          <div class="row"><span style="width:150px;flex:none">${esc(label)}</span><input readonly type="${type}" value="${esc(value)}" id="si${i}">
+          ${type === "password" ? `<button class="btn" data-show="si${i}">Anzeigen</button>` : ""}<button class="btn" data-copy="si${i}">Kopieren</button></div>`).join("")}
+      </div>`;
+      box.querySelectorAll("[data-show]").forEach((b) => b.addEventListener("click", () => {
+        const input = box.querySelector(`#${b.dataset.show}`);
+        input.type = input.type === "password" ? "text" : "password";
+      }));
+      box.querySelectorAll("[data-copy]").forEach((b) => b.addEventListener("click", async () => {
+        const input = box.querySelector(`#${b.dataset.copy}`);
+        try { await navigator.clipboard.writeText(input.value); b.textContent = "Kopiert"; }
+        catch { const t = input.type; input.type = "text"; input.select(); input.type = t; b.textContent = "Markiert – Strg+C"; }
+      }));
+    } catch (err) {
+      this._message(err.code === "unauthorized" ? "Die Einrichtungsdaten sehen nur Administratoren." : `Fehler: ${err.message}`, true);
+    }
+  }
+
+  // ── Widgets ───────────────────────────────────────────────────────────────
+
+  _nextId() {
+    const used = new Set(this._widgets.map((w) => w.id));
+    let n = 1;
+    while (used.has(`w${n}`)) n++;
+    return `w${n}`;
+  }
+
+  _add(type, x, y) {
+    if (this._widgets.length >= MAX_WIDGETS) return this._message(`Mehr als ${MAX_WIDGETS} Elemente passen nicht auf das Display.`, true);
+    const d = TYPES[type];
+    const w = { id: this._nextId(), type, entity: "", label: "", unit: type === "bar" ? "%" : "", min: 0, max: 100, w: d.w, h: d.h, x: 0, y: 0 };
+    w.x = clamp(snap(x), 0, SCREEN_W - w.w);
+    w.y = clamp(snap(y), 0, SCREEN_H - w.h);
+    this._widgets.push(w);
+    this._setDirty(true);
+    this._draw();
+    this._select(w.id);
+  }
+
+  _remove(id) {
+    this._widgets = this._widgets.filter((w) => w.id !== id);
+    this._setDirty(true);
+    this._select(null);
+    this._draw();
+  }
+
+  _find(id) { return this._widgets.find((w) => w.id === id); }
 
   _select(id) {
     this._selected = id;
-    // Update border on all widgets
-    this.shadowRoot.querySelectorAll(".w").forEach(el => {
-      el.classList.toggle("selected", el.dataset.id === id);
-    });
-    const w = id ? this._layout.widgets.find(x => x.id === id) : null;
-    this._renderProps(w);
+    for (const w of this._widgets) {
+      const el = this.shadowRoot.querySelector(`.w[data-id="${w.id}"]`);
+      if (el) this._paint(el, w);
+    }
+    this._renderProps();
   }
 
-  _renderProps(w) {
+  _key(e) {
+    const w = this._find(this._selected);
+    if (!w) return;
+    if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); return this._remove(w.id); }
+    const step = e.shiftKey ? GRID : 1;
+    const move = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[e.key];
+    if (!move) return;
+    e.preventDefault();
+    w.x = clamp(w.x + move[0], 0, SCREEN_W - w.w);
+    w.y = clamp(w.y + move[1], 0, SCREEN_H - w.h);
+    this._place(w);
+    this._setDirty(true);
+    this._syncProps();
+  }
+
+  // ── Canvas ────────────────────────────────────────────────────────────────
+
+  _draw() {
+    const canvas = this.shadowRoot.getElementById("canvas");
+    if (!canvas) return;
+    canvas.innerHTML = "";
+    for (const w of this._widgets) {
+      const el = document.createElement("div");
+      el.dataset.id = w.id;
+      canvas.appendChild(el);
+      this._paint(el, w);
+      this._drag(el, w);
+    }
+    this._sig = this._signature();
+  }
+
+  _place(w) {
+    const el = this.shadowRoot.querySelector(`.w[data-id="${w.id}"]`);
+    if (!el) return;
+    Object.assign(el.style, { left: `${w.x}px`, top: `${w.y}px`, width: `${w.w}px`, height: `${w.h}px` });
+  }
+
+  _state(w) { return w.entity ? this._hass?.states?.[w.entity]?.state : undefined; }
+
+  _paint(el, w) {
+    el.className = `w ${w.type}${w.id === this._selected ? " sel" : ""}`;
+    this._place(w);
+    const title = esc(w.label || w.entity || TYPES[w.type].name);
+    const state = this._state(w);
+    const n = parseFloat(state);
+    const isNum = Number.isFinite(n);
+    const unit = esc(w.unit);
+    const range = w.max > w.min ? w.max - w.min : 100;
+    const pct = isNum ? clamp(((n - w.min) / range) * 100, 0, 100) : 0;
+    const on = state === "on";
+    let inner;
+    switch (w.type) {
+      case "button":
+        el.classList.toggle("on", on);
+        inner = `<div class="v">${title}</div>`; break;
+      case "gauge": {
+        const size = Math.max(10, Math.min(w.w, w.h) - 34);
+        inner = `<div class="t">${title}</div><div class="ring" style="width:${size}px;height:${size}px;background:conic-gradient(from 225deg,#4fc3f7 ${pct * 2.7}deg,#2a2a44 0 270deg,transparent 0)"></div><div class="v">${isNum ? n.toFixed(1) + unit : "--"}</div>`; break;
+      }
+      case "switch":
+        inner = `<div class="t">${title}</div><div class="pill${on ? " on" : ""}"></div>`; break;
+      case "bar":
+        inner = `<div class="t">${title}</div><div class="v">${isNum ? Math.round(n) + unit : "--"}</div><div class="track"><i style="width:${pct}%"></i></div>`; break;
+      default:
+        inner = `<div class="t">${title}</div><div class="v">${state === undefined ? "--" : esc(state) + (unit ? " " + unit : "")}</div>`;
+    }
+    el.innerHTML = inner + (w.id === this._selected ? '<div class="rz"></div>' : "");
+  }
+
+  _signature() {
+    return this._widgets.map((w) => `${w.id}:${this._state(w)}`).join("|");
+  }
+
+  _refreshValues() {
+    if (!this.shadowRoot.getElementById("canvas")) return;
+    const sig = this._signature();
+    if (sig !== this._sig) {
+      this._sig = sig;
+      for (const w of this._widgets) {
+        const el = this.shadowRoot.querySelector(`.w[data-id="${w.id}"]`);
+        if (el) this._paint(el, w);
+      }
+    }
+    this._refreshDot();
+  }
+
+  _drag(el, w) {
+    el.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      e.stopPropagation();
+      const resizing = e.target.classList.contains("rz");
+      if (this._selected !== w.id) this._select(w.id);
+      this.shadowRoot.getElementById("screen").focus({ preventScroll: true });
+      const start = { x: e.clientX, y: e.clientY, wx: w.x, wy: w.y, ww: w.w, wh: w.h };
+      let moved = false;
+      const onMove = (m) => {
+        const dx = (m.clientX - start.x) / this._scale, dy = (m.clientY - start.y) / this._scale;
+        if (!moved && Math.hypot(dx, dy) < 3) return;
+        moved = true;
+        if (resizing) {
+          w.w = clamp(snap(start.ww + dx), MIN_SIZE, SCREEN_W - w.x);
+          w.h = clamp(snap(start.wh + dy), MIN_SIZE, SCREEN_H - w.y);
+          this._paint(el, w);
+        } else {
+          w.x = clamp(snap(start.wx + dx), 0, SCREEN_W - w.w);
+          w.y = clamp(snap(start.wy + dy), 0, SCREEN_H - w.h);
+          this._place(w);
+        }
+        this._setDirty(true);
+        this._syncProps();
+      };
+      const onUp = () => { window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+    });
+  }
+
+  // ── Properties ────────────────────────────────────────────────────────────
+
+  _entityIds(type) {
+    const domains = TYPES[type].domains;
+    return Object.keys(this._hass.states).filter((id) => !domains || domains.includes(id.split(".")[0])).sort();
+  }
+
+  _renderProps() {
     const panel = this.shadowRoot.getElementById("props");
+    if (!panel) return;
+    const w = this._find(this._selected);
     if (!w) {
-      panel.innerHTML = `<div class="props-empty">Widget auswählen<br>oder aus der Palette ziehen</div>`;
+      panel.innerHTML = `<div class="empty">Element aus der Palette ziehen oder anklicken.<br>Auf dem Display auswählen, dann Entität und Beschriftung festlegen.<br><br>${this._widgets.length} von ${MAX_WIDGETS} Elementen.<br>Pfeiltasten verschieben, Entf löscht.</div>`;
       return;
     }
+    const numeric = w.type === "gauge" || w.type === "bar";
+    panel.innerHTML = `<h3>${TYPES[w.type].name}</h3>
+      <div class="field"><label>Entität</label><input id="p-entity" list="p-ents" value="${esc(w.entity)}" placeholder="sensor.temperatur" autocomplete="off"><datalist id="p-ents">${this._entityIds(w.type).map((id) => `<option value="${esc(id)}">`).join("")}</datalist></div>
+      <div class="field"><label>Beschriftung</label><input id="p-label" value="${esc(w.label)}" maxlength="31" placeholder="${esc(this._hass.states[w.entity]?.attributes.friendly_name || "")}"></div>
+      ${w.type === "label" || numeric ? `<div class="field"><label>Einheit</label><input id="p-unit" value="${esc(w.unit)}" maxlength="15" placeholder="°C"></div>` : ""}
+      ${numeric ? `<div class="two"><div class="field"><label>Min</label><input id="p-min" type="number" value="${w.min}"></div><div class="field"><label>Max</label><input id="p-max" type="number" value="${w.max}"></div></div>` : ""}
+      <div class="two"><div class="field"><label>X</label><input id="p-x" type="number" value="${w.x}"></div><div class="field"><label>Y</label><input id="p-y" type="number" value="${w.y}"></div></div>
+      <div class="two"><div class="field"><label>Breite</label><input id="p-w" type="number" value="${w.w}"></div><div class="field"><label>Höhe</label><input id="p-h" type="number" value="${w.h}"></div></div>
+      <button class="btn danger" id="p-del">Element löschen</button>`;
+    const bind = (id, apply) => panel.querySelector(id)?.addEventListener("input", (e) => {
+      apply(e.target.value);
+      this._setDirty(true);
+      const el = this.shadowRoot.querySelector(`.w[data-id="${w.id}"]`);
+      if (el) this._paint(el, w);
+    });
+    bind("#p-entity", (v) => { w.entity = v.trim(); this._sig = ""; });
+    bind("#p-label", (v) => { w.label = v; });
+    bind("#p-unit", (v) => { w.unit = v; });
+    bind("#p-min", (v) => { w.min = Math.round(num(v, 0)); });
+    bind("#p-max", (v) => { w.max = Math.round(num(v, 100)); });
+    bind("#p-x", (v) => { w.x = clamp(Math.round(num(v, 0)), 0, SCREEN_W - w.w); });
+    bind("#p-y", (v) => { w.y = clamp(Math.round(num(v, 0)), 0, SCREEN_H - w.h); });
+    bind("#p-w", (v) => { w.w = clamp(Math.round(num(v, w.w)), MIN_SIZE, SCREEN_W - w.x); });
+    bind("#p-h", (v) => { w.h = clamp(Math.round(num(v, w.h)), MIN_SIZE, SCREEN_H - w.y); });
+    panel.querySelector("#p-del").addEventListener("click", () => this._remove(w.id));
+  }
 
-    const entityOptions = this._entityOptions(w.type);
-
-    panel.innerHTML = `
-      <h3>${w.type.charAt(0).toUpperCase() + w.type.slice(1)}</h3>
-      <div class="field">
-        <label>Entität</label>
-        <select id="p-entity">${entityOptions}</select>
-      </div>
-      <div class="field">
-        <label>Bezeichnung</label>
-        <input id="p-label" type="text" value="${esc(w.label||"")}" placeholder="z.B. Temperatur">
-      </div>
-      ${["label","gauge","bar"].includes(w.type) ? `
-        <div class="field">
-          <label>Einheit</label>
-          <input id="p-unit" type="text" value="${esc(w.unit||"")}" placeholder="z.B. °C">
-        </div>` : ""}
-      ${["gauge","bar"].includes(w.type) ? `
-        <div class="field-row">
-          <div class="field"><label>Min</label><input id="p-min" type="number" value="${w.min||0}"></div>
-          <div class="field"><label>Max</label><input id="p-max" type="number" value="${w.max||100}"></div>
-        </div>` : ""}
-      ${["button","switch"].includes(w.type) ? `
-        <div class="field">
-          <label>Service-Domain</label>
-          <input id="p-svc" type="text" value="${esc(w.service_domain||"homeassistant")}" placeholder="light / switch / …">
-        </div>` : ""}
-      <div class="field-row">
-        <div class="field"><label>X</label><input id="p-x" type="number" value="${w.x}"></div>
-        <div class="field"><label>Y</label><input id="p-y" type="number" value="${w.y}"></div>
-      </div>
-      <div class="field-row">
-        <div class="field"><label>Breite</label><input id="p-w" type="number" value="${w.w}"></div>
-        <div class="field"><label>Höhe</label><input id="p-h" type="number" value="${w.h}"></div>
-      </div>
-      <div class="props-actions">
-        <button class="btn btn-danger" id="p-del">Widget löschen</button>
-      </div>`;
-
-    // Set current entity selection
-    const sel = panel.querySelector("#p-entity");
-    if (sel && w.entity) sel.value = w.entity;
-
-    // Wire up change listeners
-    const fields = {
-      "#p-entity": v => { w.entity = v; this._refreshWidget(w); },
-      "#p-label":  v => { w.label = v;  this._refreshWidget(w); },
-      "#p-unit":   v => { w.unit = v;   this._refreshWidget(w); },
-      "#p-min":    v => { w.min = +v; },
-      "#p-max":    v => { w.max = +v; },
-      "#p-svc":    v => { w.service_domain = v; },
-      "#p-x":      v => { w.x = +v; this._moveWidget(w); },
-      "#p-y":      v => { w.y = +v; this._moveWidget(w); },
-      "#p-w":      v => { w.w = +v; this._resizeWidget(w); },
-      "#p-h":      v => { w.h = +v; this._resizeWidget(w); },
-    };
-    for (const [sel, fn] of Object.entries(fields)) {
-      const el = panel.querySelector(sel);
-      if (el) el.addEventListener("input", e => { fn(e.target.value); this._setSaveDirty(true); });
+  _syncProps() {
+    const w = this._find(this._selected);
+    if (!w) return;
+    for (const k of ["x", "y", "w", "h"]) {
+      const input = this.shadowRoot.getElementById(`p-${k}`);
+      if (input && document.activeElement !== input) input.value = w[k];
     }
-    panel.querySelector("#p-del")?.addEventListener("click", () => this._deleteWidget(w.id));
-  }
-
-  _entityOptions(type) {
-    if (!this._hass) return "";
-    const domainMap = {
-      button: ["light","switch","input_boolean","automation","script"],
-      switch: ["light","switch","input_boolean"],
-      gauge:  ["sensor","input_number"],
-      bar:    ["sensor","input_number"],
-      label:  null, // all
-    };
-    const allowed = domainMap[type];
-    return Object.keys(this._hass.states)
-      .filter(id => !allowed || allowed.some(d => id.startsWith(d + ".")))
-      .sort()
-      .map(id => `<option value="${esc(id)}">${esc(id)}</option>`)
-      .join("");
-  }
-
-  _updatePropsPosition(w) {
-    const px = this.shadowRoot.getElementById("p-x");
-    const py = this.shadowRoot.getElementById("p-y");
-    if (px) px.value = w.x;
-    if (py) py.value = w.y;
-  }
-
-  _refreshWidget(w) {
-    const el = this.shadowRoot.querySelector(`.w[data-id="${w.id}"]`);
-    if (el) el.innerHTML = widgetPreviewHtml(w);
-  }
-
-  _moveWidget(w) {
-    const el = this.shadowRoot.querySelector(`.w[data-id="${w.id}"]`);
-    if (el) { el.style.left = w.x + "px"; el.style.top = w.y + "px"; }
-  }
-
-  _resizeWidget(w) {
-    const el = this.shadowRoot.querySelector(`.w[data-id="${w.id}"]`);
-    if (el) { el.style.width = w.w + "px"; el.style.height = w.h + "px"; }
-  }
-
-  // ── Widget add/delete ────────────────────────────────────────────────────────
-
-  _addWidget(type, x, y) {
-    const defaults = WIDGET_DEFAULTS[type] || {};
-    const w = {
-      id: `w${++this._idSeq}`,
-      type,
-      entity: "",
-      x: Math.max(0, Math.min(DW - (defaults.w || 120), x - Math.round((defaults.w || 120) / 2))),
-      y: Math.max(0, Math.min(DH - (defaults.h || 70),  y - Math.round((defaults.h || 70) / 2))),
-      ...defaults,
-    };
-    this._layout.widgets.push(w);
-    this._renderWidget(w);
-    this._select(w.id);
-    this._setSaveDirty(true);
-  }
-
-  _deleteWidget(id) {
-    this._layout.widgets = this._layout.widgets.filter(w => w.id !== id);
-    this.shadowRoot.querySelector(`.w[data-id="${id}"]`)?.remove();
-    this._select(null);
-    this._setSaveDirty(true);
-  }
-
-  // ── UI helpers ───────────────────────────────────────────────────────────────
-
-  _setSaveDirty(dirty) {
-    this._dirty = dirty;
-    const btn = this.shadowRoot.getElementById("btn-save");
-    if (btn) {
-      btn.disabled = !dirty;
-      btn.textContent = dirty ? "Speichern *" : "Speichern";
-    }
-  }
-
-  _toast(msg, ms = 2500) {
-    const el = this.shadowRoot.getElementById("toast");
-    if (!el) return;
-    el.textContent = msg;
-    el.classList.add("show");
-    setTimeout(() => el.classList.remove("show"), ms);
   }
 }
-
-// ── Editor config (Lovelace card picker) ─────────────────────────────────────
 
 class DisplayCardEditor extends HTMLElement {
-  set hass(h) { this._hass = h; }
-  setConfig(c) {
-    this._config = c;
-    this.innerHTML = `
-      <div style="padding:16px;font-family:var(--paper-font-body1_-_font-family,sans-serif)">
-        <label style="font-size:12px;color:var(--secondary-text-color)">Gerätename (muss mit dem ESP32 übereinstimmen)</label><br>
-        <input id="dev" style="width:100%;margin-top:4px;padding:8px;border:1px solid var(--divider-color);border-radius:6px;background:var(--secondary-background-color);color:var(--primary-text-color)"
-               value="${esc(c.device||"")}" placeholder="z.B. Küche">
-      </div>`;
-    this.querySelector("#dev").addEventListener("input", e => {
-      this.dispatchEvent(new CustomEvent("config-changed", {
-        detail: { config: { ...this._config, device: e.target.value } }, bubbles: true
-      }));
+  set hass(hass) {
+    this._hass = hass;
+    if (!this._loaded) { this._loaded = true; this._load(); }
+  }
+
+  setConfig(config) { this._config = config || {}; this._render(); }
+
+  async _load() {
+    try { this._names = (await this._hass.callWS({ type: "display/devices" })).devices.map((d) => d.name); }
+    catch { this._names = []; }
+    this._render();
+  }
+
+  _render() {
+    if (!this._config) return;
+    const names = this._names || [];
+    this.innerHTML = `<div style="padding:16px;font-family:var(--paper-font-body1_-_font-family,sans-serif)">
+      <label style="font-size:12px;color:var(--secondary-text-color)">Display (leer = Auswahl in der Karte)</label>
+      <select style="width:100%;margin-top:4px;padding:8px;border:1px solid var(--divider-color);border-radius:6px;background:var(--secondary-background-color);color:var(--primary-text-color)">
+        <option value="">– in der Karte wählen –</option>${names.map((n) => `<option value="${esc(n)}" ${n === this._config.device ? "selected" : ""}>${esc(n)}</option>`).join("")}
+      </select></div>`;
+    this.querySelector("select").addEventListener("change", (e) => {
+      const config = { ...this._config };
+      if (e.target.value) config.device = e.target.value; else delete config.device;
+      this.dispatchEvent(new CustomEvent("config-changed", { detail: { config }, bubbles: true, composed: true }));
     });
   }
-}
-
-function esc(s) {
-  return String(s || "").replace(/[&<>"']/g, c =>
-    ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
 }
 
 customElements.define("display-card", DisplayCard);
@@ -635,7 +516,5 @@ window.customCards = window.customCards || [];
 window.customCards.push({
   type: "display-card",
   name: "ESP32 Display",
-  description: `Visueller Editor für ESP32 Display-Panels (v${CARD_VERSION})`,
-  preview: false,
-  editor: "display-card-editor",
+  description: `Layout-Editor für ESP32-Display-Panels (v${CARD_VERSION})`,
 });
