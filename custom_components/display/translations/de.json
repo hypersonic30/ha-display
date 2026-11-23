@@ -1,0 +1,19 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "ESP32 Display einrichten",
+        "data": {
+          "device_name": "Gerätename",
+          "ha_url": "Home Assistant URL",
+          "token": "Long-Lived Access Token"
+        },
+        "data_description": {
+          "device_name": "Name dieses Display-Geräts, z.B. Küche",
+          "ha_url": "URL deiner HA-Instanz, z.B. http://homeassistant.local:8123",
+          "token": "Token aus HA Profil → Langlebige Zugriffstoken"
+        }
+      }
+    }
+  }
+}
