@@ -19,7 +19,7 @@ from homeassistant.core import Event, EventStateChangedData, HomeAssistant, call
 from homeassistant.helpers.event import async_track_state_change_event
 
 from .const import ACTION_DOMAINS, DOMAIN
-from .devices import brightness_of, find_by_key, get_entry
+from .devices import brightness_of, find_by_key, get_entry, rotation_of, screen_size
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -62,8 +62,10 @@ class PanelSession:
         self._store = hass.data[DOMAIN]["store"]
         self._lock = asyncio.Lock()
         self._widgets: list[dict] = []
+        self._page = 0
         self._unsub_states = None
         self._last_action = 0.0
+        self._last_page = 0.0
 
     async def _send(self, payload: dict[str, Any]) -> None:
         async with self._lock:
@@ -76,12 +78,20 @@ class PanelSession:
         if sub is None:
             return None
         layout = self._store.get(self.device_id)
+        pages = layout["pages"]
+        self._page = max(0, min(self._page, len(pages) - 1))
+        page = pages[self._page]
+        width, height = screen_size(rotation_of(sub))
         return {
             "type": "layout",
             "name": sub.title,
             "rev": layout["rev"],
-            "settings": {"brightness": brightness_of(sub)},
-            "widgets": layout["widgets"],
+            "settings": {"brightness": brightness_of(sub), "rotation": rotation_of(sub)},
+            "screen": {"w": width, "h": height},
+            "page": {"index": self._page, "count": len(pages), "name": page["name"]},
+            # Only worth showing when there is somewhere to go.
+            "pager": layout["pager"] if len(pages) > 1 else None,
+            "widgets": page["widgets"],
         }
 
     def _state_of(self, entity_id: str) -> str:
@@ -118,7 +128,19 @@ class PanelSession:
         if not self.ws.closed:
             await self.ws.close(code=code, message=reason.encode())
 
+    async def _switch_page(self, direction: Any) -> None:
+        now = time.monotonic()
+        if direction not in ("next", "prev") or now - self._last_page < MIN_ACTION_GAP:
+            return
+        self._last_page = now
+        count = len(self._store.get(self.device_id)["pages"])
+        self._page = (self._page + (1 if direction == "next" else -1)) % count
+        await self.send_layout()
+
     async def handle(self, msg: dict) -> None:
+        if msg.get("type") == "page":
+            await self._switch_page(msg.get("dir"))
+            return
         widget = next((w for w in self._widgets if w["id"] == msg.get("widget")), None)
         if widget is None:
             return

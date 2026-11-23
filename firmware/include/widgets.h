@@ -2,9 +2,9 @@
 #include <lvgl.h>
 #include <ArduinoJson.h>
 
-// Rebuilds the whole screen from the layout; returns the number of widgets.
-// With an empty layout a hint with `device_name` is shown instead.
-int  widgets_build(JsonArrayConst layout, const char *device_name);
+// Rebuilds the whole screen from a layout frame ({widgets, page, pager, ...}); returns the number of
+// widgets on this page (without the pager). With an empty page a hint with `device_name` is shown.
+int  widgets_build(JsonObjectConst frame, const char *device_name);
 
 void widgets_update(const char *entity_id, const char *state);
 

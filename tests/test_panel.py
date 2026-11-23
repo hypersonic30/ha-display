@@ -8,7 +8,7 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.helpers import entity_registry as er
 
 from custom_components.display import panel
-from custom_components.display.const import CONF_BRIGHTNESS, CONF_DEVICE_KEY, DOMAIN
+from custom_components.display.const import CONF_BRIGHTNESS, CONF_DEVICE_KEY, CONF_ROTATION, DOMAIN
 
 from .conftest import device
 
@@ -40,9 +40,17 @@ def dev_id(entry, name):
     return next(s.subentry_id for s in entry.subentries.values() if s.title == name)
 
 
-async def save(hass, entry, name, widgets):
-    from custom_components.display.layouts import validate_widgets  # noqa: PLC0415
-    await hass.data[DOMAIN]["store"].async_set(dev_id(entry, name), validate_widgets(widgets))
+async def save(hass, entry, name, widgets, rotation=0):
+    """One page with these widgets."""
+    await save_pages(hass, entry, name, [{"id": "p1", "name": "Seite 1", "widgets": widgets}], None, rotation)
+
+
+async def save_pages(hass, entry, name, pages, pager=None, rotation=0):
+    from custom_components.display.devices import screen_size  # noqa: PLC0415
+    from custom_components.display.layouts import validate_layout  # noqa: PLC0415
+    screen = screen_size(rotation)
+    pages, pager = validate_layout(pages, pager, screen)
+    await hass.data[DOMAIN]["store"].async_set(dev_id(entry, name), pages, pager, screen)
     await hass.async_block_till_done()
 
 
@@ -96,7 +104,8 @@ async def test_each_panel_gets_its_own_layout_and_states(hass, make_entry, hass_
     ws = await connect(hass_client_no_auth)
     layout = await recv(ws)
     assert layout["type"] == "layout" and layout["name"] == "Küche" and layout["rev"] == 1
-    assert layout["settings"] == {"brightness": 60} and [w["id"] for w in layout["widgets"]] == ["b1", "l1"]
+    assert layout["settings"] == {"brightness": 60, "rotation": 0} and [w["id"] for w in layout["widgets"]] == ["b1", "l1"]
+    assert layout["screen"] == {"w": 480, "h": 320} and layout["page"] == {"index": 0, "count": 1, "name": "Seite 1"} and layout["pager"] is None
     assert await recv(ws) == {"type": "states", "states": {"light.kitchen": "on", "sensor.temp": "21.5"}}
 
     other = await connect(hass_client_no_auth, key="key-bad")
@@ -136,9 +145,9 @@ async def test_layout_and_settings_changes_reach_a_connected_panel(hass, make_en
     hass.states.async_set("light.kitchen", "on")
     assert await recv(ws) == {"type": "states", "states": {"light.kitchen": "on"}}
 
-    hass.config_entries.async_update_subentry(entry, entry.subentries[dev_id(entry, "Küche")], data={CONF_BRIGHTNESS: 30, CONF_DEVICE_KEY: "key-küche"})
+    hass.config_entries.async_update_subentry(entry, entry.subentries[dev_id(entry, "Küche")], data={CONF_BRIGHTNESS: 30, CONF_ROTATION: 0, CONF_DEVICE_KEY: "key-küche"})
     await hass.async_block_till_done()
-    assert (await recv(ws))["settings"] == {"brightness": 30}
+    assert (await recv(ws))["settings"] == {"brightness": 30, "rotation": 0}
 
 
 async def test_taps_are_mapped_by_the_server_from_the_layout(hass, make_entry, hass_client_no_auth):
@@ -224,7 +233,7 @@ async def test_renewing_the_key_or_removing_the_display_disconnects_the_panel(ha
     entry = await setup(hass, make_entry, device("Küche"), device("Bad"))
     ws = await connect(hass_client_no_auth)
     await recv(ws); await recv(ws)
-    hass.config_entries.async_update_subentry(entry, entry.subentries[dev_id(entry, "Küche")], data={CONF_BRIGHTNESS: 80, CONF_DEVICE_KEY: "renewed"})
+    hass.config_entries.async_update_subentry(entry, entry.subentries[dev_id(entry, "Küche")], data={CONF_BRIGHTNESS: 80, CONF_ROTATION: 0, CONF_DEVICE_KEY: "renewed"})
     await hass.async_block_till_done()
     assert (await asyncio.wait_for(ws.receive(), 3)).type.name in ("CLOSE", "CLOSING", "CLOSED")
     again = await connect(hass_client_no_auth)                       # the old key no longer works
@@ -251,7 +260,7 @@ async def test_removing_the_integration_disconnects_panels_and_refuses_new_ones(
 async def test_the_server_refuses_dangerous_domains_even_if_a_layout_got_past_validation(hass, make_entry, hass_client_no_auth):
     entry = await setup(hass, make_entry, device("Küche"))
     sneaky = [{**BTN, "id": "b9", "entity": "lock.front_door", "label": "", "unit": "", "min": 0, "max": 100}]
-    await hass.data[DOMAIN]["store"].async_set(dev_id(entry, "Küche"), sneaky)      # bypasses validate_widgets
+    await hass.data[DOMAIN]["store"].async_set(dev_id(entry, "Küche"), [{"id": "p1", "name": "S", "widgets": sneaky}], None, (480, 320))      # bypasses validation
     toggles = async_mock_service(hass, "homeassistant", "toggle")
     unlocks = async_mock_service(hass, "lock", "unlock")
     ws = await connect(hass_client_no_auth)
@@ -268,3 +277,133 @@ async def test_the_first_snapshot_is_cut_like_later_updates(hass, make_entry, ha
     ws = await connect(hass_client_no_auth)
     await recv(ws)
     assert len((await recv(ws))["states"]["sensor.temp"].encode()) <= 47
+
+
+PAGES = [
+    {"id": "p1", "name": "Wohnen", "widgets": [LBL, BTN]},
+    {"id": "p2", "name": "Bad", "widgets": [{"id": "l2", "type": "label", "entity": "sensor.bath", "x": 0, "y": 0, "w": 100, "h": 50},
+                                           {"id": "b9", "type": "button", "entity": "light.bath", "x": 0, "y": 60, "w": 100, "h": 50}]},
+    {"id": "p3", "name": "Keller", "widgets": []},
+]
+PAGER = {"x": 100, "y": 270, "w": 200, "h": 40, "mode": "count"}
+
+
+async def page_frames(ws):
+    """layout + the snapshot that follows it"""
+    layout = await recv(ws)
+    assert layout["type"] == "layout"
+    return layout, await recv(ws)
+
+
+async def test_the_panel_gets_only_the_current_page_and_can_page_through_them(hass, make_entry, hass_client_no_auth):
+    entry = await setup(hass, make_entry, device("Küche"))
+    await save_pages(hass, entry, "Küche", PAGES, PAGER)
+    hass.states.async_set("sensor.temp", "21")
+    hass.states.async_set("sensor.bath", "55")
+    ws = await connect(hass_client_no_auth)
+
+    layout, states = await page_frames(ws)
+    assert layout["page"] == {"index": 0, "count": 3, "name": "Wohnen"} and layout["pager"] == PAGER
+    assert [w["id"] for w in layout["widgets"]] == ["l1", "b1"]
+    assert states["states"] == {"light.kitchen": "unavailable", "sensor.temp": "21"}
+
+    await ws.send_json({"type": "page", "dir": "next"})
+    layout, states = await page_frames(ws)
+    assert layout["page"] == {"index": 1, "count": 3, "name": "Bad"} and [w["id"] for w in layout["widgets"]] == ["l2", "b9"]
+    assert states["states"] == {"light.bath": "unavailable", "sensor.bath": "55"}
+
+    # only the current page's entities are watched
+    hass.states.async_set("sensor.temp", "99")
+    hass.states.async_set("sensor.bath", "56")
+    assert await recv(ws) == {"type": "states", "states": {"sensor.bath": "56"}}
+
+    await ws.send_json({"type": "page", "dir": "next"})
+    layout, states = await page_frames(ws)
+    assert layout["page"]["index"] == 2 and layout["widgets"] == [] and states["states"] == {}
+    await ws.send_json({"type": "page", "dir": "next"})                          # wraps around
+    layout, _ = await page_frames(ws)
+    assert layout["page"]["index"] == 0
+    await ws.send_json({"type": "page", "dir": "prev"})                          # and back
+    layout, _ = await page_frames(ws)
+    assert layout["page"]["index"] == 2 and layout["page"]["name"] == "Keller"
+
+    for junk in ({"type": "page", "dir": "sideways"}, {"type": "page"}, {"type": "page", "dir": 5}):
+        await ws.send_json(junk)
+    await ws.send_json({"type": "page", "dir": "next"})
+    layout, _ = await page_frames(ws)
+    assert layout["page"]["index"] == 0                                           # the junk changed nothing
+
+
+async def test_the_pager_is_only_sent_when_there_is_somewhere_to_go(hass, make_entry, hass_client_no_auth):
+    entry = await setup(hass, make_entry, device("Küche"))
+    await save_pages(hass, entry, "Küche", PAGES[:1], PAGER)
+    ws = await connect(hass_client_no_auth)
+    layout, _ = await page_frames(ws)
+    assert layout["page"]["count"] == 1 and layout["pager"] is None
+    await save_pages(hass, entry, "Küche", PAGES[:2], PAGER)
+    layout, _ = await page_frames(ws)
+    assert layout["pager"] == PAGER
+
+
+async def test_taps_only_work_on_the_page_that_is_showing(hass, make_entry, hass_client_no_auth):
+    entry = await setup(hass, make_entry, device("Küche"))
+    await save_pages(hass, entry, "Küche", PAGES, PAGER)
+    toggles = async_mock_service(hass, "homeassistant", "toggle")
+    ws = await connect(hass_client_no_auth)
+    await page_frames(ws)
+
+    await ws.send_json({"type": "tap", "widget": "b9"})                          # lives on page 2
+    await asyncio.sleep(0.1); await hass.async_block_till_done()
+    assert toggles == []
+    await ws.send_json({"type": "page", "dir": "next"})
+    await page_frames(ws)
+    await ws.send_json({"type": "tap", "widget": "b1"})                          # lives on page 1
+    await ws.send_json({"type": "tap", "widget": "b9"})
+    await asyncio.sleep(0.1); await hass.async_block_till_done()
+    assert [c.data["entity_id"] for c in toggles] == ["light.bath"]
+
+
+async def test_the_page_shown_survives_edits_and_is_clamped_when_pages_go_away(hass, make_entry, hass_client_no_auth):
+    entry = await setup(hass, make_entry, device("Küche"))
+    await save_pages(hass, entry, "Küche", PAGES, PAGER)
+    ws = await connect(hass_client_no_auth)
+    await page_frames(ws)
+    await ws.send_json({"type": "page", "dir": "prev"})                          # page 3 (index 2)
+    layout, _ = await page_frames(ws)
+    assert layout["page"]["index"] == 2
+
+    await save_pages(hass, entry, "Küche", PAGES, {**PAGER, "mode": "name"})      # an edit: stay on the page
+    layout, _ = await page_frames(ws)
+    assert layout["page"]["index"] == 2 and layout["pager"]["mode"] == "name"
+    await save_pages(hass, entry, "Küche", PAGES[:2], PAGER)                      # page 3 deleted
+    layout, _ = await page_frames(ws)
+    assert layout["page"] == {"index": 1, "count": 2, "name": "Bad"}
+
+
+async def test_rotation_and_screen_size_reach_the_panel(hass, make_entry, hass_client_no_auth):
+    entry = await setup(hass, make_entry, device("Küche", rotation=3))
+    await save(hass, entry, "Küche", [LBL], rotation=3)
+    ws = await connect(hass_client_no_auth)
+    layout, _ = await page_frames(ws)
+    assert layout["settings"]["rotation"] == 3 and layout["screen"] == {"w": 320, "h": 480}
+
+    sub = entry.subentries[dev_id(entry, "Küche")]
+    hass.config_entries.async_update_subentry(entry, sub, data={**sub.data, CONF_ROTATION: 2})
+    await hass.async_block_till_done()
+    layout, _ = await page_frames(ws)
+    assert layout["settings"]["rotation"] == 2 and layout["screen"] == {"w": 480, "h": 320}
+    assert layout["rev"] == 2                                                     # refitted, so the panel rebuilds
+
+
+async def test_page_switches_are_rate_limited(hass, make_entry, hass_client_no_auth, monkeypatch):
+    monkeypatch.setattr(panel, "MIN_ACTION_GAP", 5)
+    entry = await setup(hass, make_entry, device("Küche"))
+    await save_pages(hass, entry, "Küche", PAGES, PAGER)
+    ws = await connect(hass_client_no_auth)
+    await page_frames(ws)
+    for _ in range(4):
+        await ws.send_json({"type": "page", "dir": "next"})
+    layout, _ = await page_frames(ws)
+    assert layout["page"]["index"] == 1
+    with pytest.raises(TimeoutError):                                             # nothing else was switched
+        await asyncio.wait_for(ws.receive_json(), 0.3)

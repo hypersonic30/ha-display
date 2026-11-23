@@ -78,15 +78,15 @@ def mount(pg, stub, config=None, states=STATES):
       const store = stub.store;
       window.__stub = {
         "display/devices": () => stub.devices,
-        "display/layout/get": (m) => ({ name: "x", rev: 1, widgets: store[m.device_id] || [], settings: { brightness: 80 } }),
-        "display/layout/set": (m) => { if (stub.saveError) throw { code: "invalid_format", message: stub.saveError }; store[m.device_id] = m.widgets; return { rev: 2, widgets: m.widgets }; },
+        "display/layout/get": (m) => ({ name: "x", rev: 1, ...store[m.device_id], screen: stub.screens[m.device_id] || { w: 480, h: 320 }, settings: { brightness: 80, rotation: 0 } }),
+        "display/layout/set": (m) => { if (stub.saveError) throw { code: "invalid_format", message: stub.saveError }; store[m.device_id] = { pages: m.pages, pager: m.pager }; return { rev: 2, name: "x", pages: m.pages, pager: m.pager, screen: stub.screens[m.device_id] || { w: 480, h: 320 }, settings: { brightness: 80, rotation: 0 } }; },
         "display/setup_info": (m) => { if (stub.notAdmin) throw { code: "unauthorized", message: "Unauthorized" }; return { name: "Küche", ha_url: "http://ha:8123", device_key: "SECRET-KEY_1" }; },
       };
       window.mount(config, states);
     }""", [stub, config or {}, states])
     pg.wait_for_timeout(300)
 
-def stub(**kw): return {"devices": DEVICES, "store": {"D1": [dict(W1)], "D2": []}, **kw}
+def stub(**kw): return {"devices": DEVICES, "screens": {}, "store": {"D1": {"pages": [{"id": "p1", "name": "Wohnen", "widgets": [dict(W1)]}], "pager": None}, "D2": {"pages": [{"id": "p1", "name": "Seite 1", "widgets": []}], "pager": None}}, **kw}
 
 with sync_playwright() as p:
     b = p.chromium.launch(channel="chrome", headless=True, args=["--no-sandbox"])
@@ -144,7 +144,7 @@ with sync_playwright() as p:
     # ── saving ─────────────────────────────────────────────────────────────────
     pg.click("display-card >> #save"); pg.wait_for_timeout(300)
     sent = calls(pg, "display/layout/set")[-1]
-    check("save sends device id and the plain widget list", sent["device_id"] == "D1" and [w["id"] for w in sent["widgets"]] == ["w1", "w2"] and "service_domain" not in sent["widgets"][1], sent)
+    check("save sends device id, the pages and no pager", sent["device_id"] == "D1" and [w["id"] for w in sent["pages"][0]["widgets"]] == ["w1", "w2"] and sent["pager"] is None and "service_domain" not in sent["pages"][0]["widgets"][1], sent)
     check("after saving the button is disabled again", sh(pg, "r.getElementById('save').disabled"))
 
     pg.evaluate("() => { card._find('w1').label = 'x'; card._setDirty(true) }")
@@ -161,7 +161,7 @@ with sync_playwright() as p:
     # ── limit ──────────────────────────────────────────────────────────────────
     mount(pg, stub())
     for _ in range(40): pg.evaluate("() => card.shadowRoot.querySelector('.pi[data-type=label]').click()")
-    check("at most 32 widgets", sh(pg, "card._widgets.length") == 32 and "32" in sh(pg, "r.getElementById('msg').textContent"), sh(pg, "card._widgets.length"))
+    check("at most 32 widgets", sh(pg, "card._widgets.length") == 32 and "32" in sh(pg, "r.getElementById('msg').textContent") and "Seite" in sh(pg, "r.getElementById('msg').textContent"), sh(pg, "card._widgets.length"))
 
     # ── unsaved changes guard when switching display ───────────────────────────
     mount(pg, stub())
@@ -190,6 +190,77 @@ with sync_playwright() as p:
     mount(pg, stub(notAdmin=True))
     pg.click("display-card >> #setup"); pg.wait_for_timeout(200)
     check("non-admins get a clear message instead of the token", "Administratoren" in sh(pg, "r.getElementById('msg').textContent") and "SECRET" not in sh(pg, "r.innerHTML"))
+
+    # ── pages ──────────────────────────────────────────────────────────────────
+    mount(pg, stub())
+    chips = lambda: sh(pg, "[...r.querySelectorAll('#pages .chip[data-page]')].map(c => c.textContent)")
+    check("the page bar lists the pages, the current one is highlighted", chips() == ["Wohnen"] and sh(pg, "r.querySelector('#pages .chip.on').textContent") == "Wohnen", chips())
+    check("with nothing selected the side panel is about the page", "Seite 1 von 1" in sh(pg, "r.getElementById('props').textContent") and sh(pg, "r.getElementById('pg-name').value") == "Wohnen")
+    check("a single page cannot be deleted or moved", sh(pg, "r.getElementById('pg-del').disabled && r.getElementById('pg-left').disabled && r.getElementById('pg-right').disabled"))
+    pg.click("display-card >> #pg-add"); pg.wait_for_timeout(100)
+    check("+ adds an empty page after the current one and opens it", chips() == ["Wohnen", "Seite 2"] and sh(pg, "card._page") == 1 and sh(pg, "card._widgets.length") == 0 and sh(pg, "r.querySelectorAll('.w').length") == 0)
+    pg.fill("display-card >> #pg-name", "Bad"); pg.wait_for_timeout(50)
+    check("renaming updates the chip", chips() == ["Wohnen", "Bad"], chips())
+    pg.fill("display-card >> #pg-name", "ü" * 40); pg.wait_for_timeout(50)
+    check("names are cut at 31 bytes (umlauts count double)", len(sh(pg, "card._pages[1].name").encode()) <= 31 and sh(pg, "card._pages[1].name").startswith("ü"), sh(pg, "card._pages[1].name"))
+    pg.fill("display-card >> #pg-name", "ü" * 15); pg.wait_for_timeout(50)
+    pg.evaluate("() => card._addPage(true)"); pg.wait_for_timeout(50)
+    check("a copy of a long name is cut to fit instead of being rejected later", len(sh(pg, "card._pages[card._page].name").encode()) <= 31, sh(pg, "card._pages[card._page].name"))
+    pg.evaluate("() => card._deletePage()"); pg.wait_for_timeout(50)
+    pg.fill("display-card >> #pg-name", "Bad")
+    pg.evaluate("() => card._add('label', 40, 40)"); pg.wait_for_timeout(50)
+    check("widgets belong to the page they were added on, ids are per page", sh(pg, "card._pages[1].widgets.map(w => w.id)") == ["w1"] and sh(pg, "card._pages[0].widgets.length") == 1)
+    pg.click("display-card >> .chip[data-page='0']"); pg.wait_for_timeout(100)
+    check("switching pages shows that page's widgets", sh(pg, "card._page") == 0 and sh(pg, "r.querySelectorAll('.w').length") == 1 and "21.5" in sh(pg, "r.querySelector('.w .v').textContent"))
+    pg.click("display-card >> #pg-right"); pg.wait_for_timeout(100)
+    check("a page can be moved back", chips() == ["Bad", "Wohnen"] and sh(pg, "card._page") == 1, chips())
+    pg.click("display-card >> #pg-dup"); pg.wait_for_timeout(100)
+    check("duplicating copies the widgets onto a new page", len(chips()) == 3 and sh(pg, "card._widgets.length") == 1 and sh(pg, "card._pages[2].id") != sh(pg, "card._pages[1].id"), chips())
+    pg.evaluate("() => { window.__confirm = false }"); pg.click("display-card >> #pg-del"); pg.wait_for_timeout(100)
+    check("deleting a page with elements asks first", len(chips()) == 3)
+    pg.evaluate("() => { window.__confirm = true }"); pg.click("display-card >> #pg-del"); pg.wait_for_timeout(100)
+    check("after deleting, a neighbour page is shown", len(chips()) == 2 and 0 <= sh(pg, "card._page") < 2)
+    for _ in range(10): pg.evaluate("() => card._addPage()")
+    check("at most 8 pages", len(chips()) == 8 and sh(pg, "r.getElementById('pg-add').disabled"), len(chips()))
+
+    # ── the page switcher ─────────────────────────────────────────────────────
+    mount(pg, stub())
+    pg.evaluate("() => card.shadowRoot.querySelector('.pi[data-type=pager]').click()"); pg.wait_for_timeout(100)
+    pager = sh(pg, "({...card._pager})")
+    check("the palette adds the switcher at the bottom centre and selects it", pager["y"] + pager["h"] <= 320 and pager["y"] > 200 and abs(pager["x"] + pager["w"] / 2 - 240) <= 5 and sh(pg, "card._selected") == "__pager", pager)
+    check("it shows < name > and is dimmed while there is only one page", sh(pg, "r.querySelector('.w.pager .pl').textContent") == "Wohnen" and sh(pg, "r.querySelector('.w.pager').classList.contains('idle')") and sh(pg, "[...r.querySelectorAll('.w.pager .ar')].map(e => e.textContent)") == ["<", ">"])
+    pg.evaluate("() => card.shadowRoot.querySelector('.pi[data-type=pager]').click()")
+    check("a second click does not add a second one", sh(pg, "r.querySelectorAll('.w.pager').length") == 1)
+    pg.select_option("display-card >> #p-mode", "count"); pg.wait_for_timeout(50)
+    check("the mode switches the label to the page number", sh(pg, "r.querySelector('.w.pager .pl').textContent") == "1 / 1")
+    pg.click("display-card >> #pg-add") if False else pg.evaluate("() => card._addPage()")
+    pg.wait_for_timeout(100)
+    check("with two pages it is no longer dimmed and counts", not sh(pg, "r.querySelector('.w.pager').classList.contains('idle')") and sh(pg, "r.querySelector('.w.pager .pl').textContent") == "2 / 2")
+    check("it is on every page", sh(pg, "r.querySelectorAll('.w.pager').length") == 1)
+    pg.evaluate("() => card._select('__pager')")
+    pg.fill("display-card >> #p-w", "9999"); pg.wait_for_timeout(50); pg.fill("display-card >> #p-h", "5"); pg.wait_for_timeout(50)
+    check("size and position are free but stay on screen and above a minimum", sh(pg, "card._pager.x + card._pager.w") <= 480 and sh(pg, "card._pager.h") >= 24, sh(pg, "[card._pager.x, card._pager.w, card._pager.h]"))
+    box = pg.evaluate("() => { const b = card.shadowRoot.querySelector('.w.pager').getBoundingClientRect(); return [b.x, b.y, b.width, b.height] }"); sc = sh(pg, "card._scale")
+    x0 = sh(pg, "card._pager.x"); y0 = sh(pg, "card._pager.y")
+    pg.mouse.move(box[0] + box[2] / 2, box[1] + box[3] / 2); pg.mouse.down(); pg.mouse.move(box[0] + box[2] / 2 - 20 * sc, box[1] + box[3] / 2 - 30 * sc, steps=4); pg.mouse.up()
+    check("the switcher can be dragged", sh(pg, "card._pager.y") < y0 and sh(pg, "card._pager.y") % 5 == 0, (x0, y0, sh(pg, "[card._pager.x, card._pager.y]")))
+    pg.focus("display-card >> #screen"); pg.keyboard.press("Delete"); pg.wait_for_timeout(50)
+    check("Delete removes the switcher again", sh(pg, "card._pager") is None and sh(pg, "r.querySelectorAll('.w.pager').length") == 0)
+    pg.evaluate("() => { card._addPager(100, 250, false); card._pager.mode = 'count'; card._setDirty(true) }"); pg.click("display-card >> #save"); pg.wait_for_timeout(300)
+    sent = calls(pg, "display/layout/set")[-1]
+    check("saving sends the switcher without internal fields", sorted(sent["pager"]) == ["h", "mode", "w", "x", "y"] and sent["pager"]["mode"] == "count", sent["pager"])
+
+    # ── portrait ──────────────────────────────────────────────────────────────
+    mount(pg, stub(screens={"D1": {"w": 320, "h": 480}}))
+    check("a portrait display gets a portrait canvas", sh(pg, "card._W") == 320 and sh(pg, "card._H") == 480 and "Hochformat" in sh(pg, "r.getElementById('res').textContent"), sh(pg, "r.getElementById('res').textContent"))
+    dims = pg.evaluate("() => { const b = card.shadowRoot.getElementById('screen').getBoundingClientRect(); return [b.width, b.height] }")
+    check("and fits a sensible height", dims[1] <= 641, dims)
+    check("with the matching aspect ratio", abs(dims[0] / dims[1] - 320 / 480) < 0.01, dims)
+    pg.evaluate("() => card._add('bar', 0, 0)"); pg.fill("display-card >> #p-w", "9999"); pg.wait_for_timeout(50)
+    pg.evaluate("() => card._add('label', 0, 400)")
+    check("widgets are clamped to the narrow screen", sh(pg, "card._widgets.every(w => w.x + w.w <= 320 && w.y + w.h <= 480)"))
+    pg.evaluate("() => card._addPager(0, 0, true)")
+    check("the switcher fits the portrait width", sh(pg, "card._pager.x + card._pager.w") <= 320 and sh(pg, "card._pager.y + card._pager.h") <= 480)
 
     # ── inside Home Assistant the card must wait for the app's own element registry ──────────────────
     sim = b.new_page()

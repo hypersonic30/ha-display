@@ -28,18 +28,50 @@ void storage_save(const Config &cfg) {
     p.end();
 }
 
-bool storage_load_touch(uint16_t cal[5]) {
+static const size_t CAL_BYTES = 5 * sizeof(uint16_t);
+
+static void touch_key(int rotation, char *key, size_t n) {
+    snprintf(key, n, "touch_cal%d", rotation & 3);
+}
+
+bool storage_load_touch(int rotation, uint16_t cal[5]) {
+    char key[16];
+    touch_key(rotation, key, sizeof(key));
     Preferences p;
-    p.begin(NS, true);
-    bool ok = p.getBytesLength("touch_cal") == 5 * sizeof(uint16_t) &&
-              p.getBytes("touch_cal", cal, 5 * sizeof(uint16_t)) == 5 * sizeof(uint16_t);
+    p.begin(NS, false);
+    // One-time migration: the single calibration of the first firmware was made in landscape.
+    if (p.getBytesLength(key) != CAL_BYTES && (rotation & 3) == 0 && p.getBytesLength("touch_cal") == CAL_BYTES) {
+        uint16_t old[5];
+        if (p.getBytes("touch_cal", old, CAL_BYTES) == CAL_BYTES) {
+            p.putBytes(key, old, CAL_BYTES);
+            p.remove("touch_cal");
+        }
+    }
+    bool ok = p.getBytesLength(key) == CAL_BYTES && p.getBytes(key, cal, CAL_BYTES) == CAL_BYTES;
     p.end();
     return ok;
 }
 
-void storage_save_touch(const uint16_t cal[5]) {
+void storage_save_touch(int rotation, const uint16_t cal[5]) {
+    char key[16];
+    touch_key(rotation, key, sizeof(key));
     Preferences p;
     p.begin(NS, false);
-    p.putBytes("touch_cal", cal, 5 * sizeof(uint16_t));
+    p.putBytes(key, cal, CAL_BYTES);
+    p.end();
+}
+
+int storage_load_rotation() {
+    Preferences p;
+    p.begin(NS, true);
+    int r = p.getInt("rotation", 0);
+    p.end();
+    return (r < 0 || r > 3) ? 0 : r;
+}
+
+void storage_save_rotation(int rotation) {
+    Preferences p;
+    p.begin(NS, false);
+    if (p.getInt("rotation", -1) != rotation) p.putInt("rotation", rotation);
     p.end();
 }

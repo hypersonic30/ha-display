@@ -1,7 +1,16 @@
 from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResultType
 
-from custom_components.display.const import CONF_BRIGHTNESS, CONF_DEVICE_KEY, CONF_HA_URL, CONF_NAME, CONF_NEW_KEY, DOMAIN, SUBENTRY_DEVICE
+from custom_components.display.const import (
+    CONF_BRIGHTNESS,
+    CONF_DEVICE_KEY,
+    CONF_HA_URL,
+    CONF_NAME,
+    CONF_NEW_KEY,
+    CONF_ROTATION,
+    DOMAIN,
+    SUBENTRY_DEVICE,
+)
 
 from .conftest import device
 
@@ -74,13 +83,32 @@ async def test_editing_a_display_keeps_its_key_unless_renewed(hass, make_entry):
         result = await flow.async_init(
             (entry.entry_id, SUBENTRY_DEVICE), context={"source": config_entries.SOURCE_RECONFIGURE, "subentry_id": sub.subentry_id}
         )
-        return await flow.async_configure(result["flow_id"], {CONF_NAME: "KÜCHE", CONF_BRIGHTNESS: 25, **values})
+        return await flow.async_configure(result["flow_id"], {CONF_NAME: "KÜCHE", CONF_BRIGHTNESS: 25, CONF_ROTATION: "0", **values})
 
     done = await reconfigure(**{CONF_NEW_KEY: False})
     assert done["type"] is FlowResultType.ABORT and done["reason"] == "reconfigure_successful"
     assert entry.subentries[sub.subentry_id].title == "KÜCHE"
-    assert entry.subentries[sub.subentry_id].data == {CONF_BRIGHTNESS: 25, CONF_DEVICE_KEY: "old-key"}
+    assert entry.subentries[sub.subentry_id].data == {CONF_BRIGHTNESS: 25, CONF_ROTATION: 0, CONF_DEVICE_KEY: "old-key"}
 
     await reconfigure(**{CONF_NEW_KEY: True})
     fresh = entry.subentries[sub.subentry_id].data[CONF_DEVICE_KEY]
     assert fresh != "old-key" and len(fresh) >= 30
+
+
+async def test_orientation_is_chosen_per_display_and_stored_as_a_number(hass, make_entry):
+    entry = make_entry(device("Küche"))
+    flow = hass.config_entries.subentries
+    result = await flow.async_init((entry.entry_id, SUBENTRY_DEVICE), context={"source": config_entries.SOURCE_USER})
+    default = await flow.async_configure(result["flow_id"], {CONF_NAME: "Flur", CONF_BRIGHTNESS: 50})
+    assert default["type"] is FlowResultType.CREATE_ENTRY
+    assert next(s for s in entry.subentries.values() if s.title == "Flur").data[CONF_ROTATION] == 0
+
+    result = await flow.async_init((entry.entry_id, SUBENTRY_DEVICE), context={"source": config_entries.SOURCE_USER})
+    portrait = await flow.async_configure(result["flow_id"], {CONF_NAME: "Bad", CONF_BRIGHTNESS: 50, CONF_ROTATION: "1"})
+    assert next(s for s in entry.subentries.values() if s.title == "Bad").data[CONF_ROTATION] == 1
+
+    result = await flow.async_init((entry.entry_id, SUBENTRY_DEVICE), context={"source": config_entries.SOURCE_USER})
+    import voluptuous as vol  # noqa: PLC0415
+    import pytest  # noqa: PLC0415
+    with pytest.raises(vol.Invalid):
+        await flow.async_configure(result["flow_id"], {CONF_NAME: "Keller", CONF_BRIGHTNESS: 50, CONF_ROTATION: "7"})

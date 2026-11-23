@@ -4,6 +4,8 @@ Selbstgebautes Touch-Panel (ESP32 + ILI9488 480×320) für Home Assistant. Das L
 
 - **Eine Integration, beliebig viele Displays** – Geräte sind Unterkonten; **kein Home-Assistant-Token im Display**
 - **Visueller Editor** (Lovelace-Karte): Elemente ziehen, Entität wählen, speichern
+- **Mehrere Seiten** pro Display mit frei platzierbarem **Seitenwechsel** (Pfeile links/rechts, Seitenname oder Nummer in der Mitte)
+- **Hoch- oder Querformat**, pro Display einstellbar
 - **Fertige Firmware** zum Flashen, Ersteinrichtung per WLAN-Hotspot am Handy
 - **Live-Werte** und **Touch-Bedienung** (Taster, Schalter) direkt am Display
 - Alles aus einem Repository, Installation über **HACS**
@@ -34,7 +36,7 @@ T_IRQ (IO27) und der Piezo-Treiber (IO26) werden von der Firmware nicht genutzt.
 1. HACS → ⋮ → **Benutzerdefinierte Repositories** → `https://github.com/hypersonic30/ha-display`, Kategorie **Integration**
 2. **ESP32 Display** installieren, Home Assistant neu starten
 3. **Einstellungen → Geräte & Dienste → Integration hinzufügen → ESP32 Display** – gefragt wird nur die **Home-Assistant-URL**, unter der die Displays Home Assistant erreichen (vorausgefüllt), z. B. `http://192.168.1.10:8123`
-4. In der Integration **Display hinzufügen** – Name (z. B. `Küche`) und Helligkeit. Jedes Display ist ein Unterkonto und bekommt automatisch einen **eigenen Gerätecode**.
+4. In der Integration **Display hinzufügen** – Name (z. B. `Küche`), Helligkeit und **Ausrichtung** (Quer-/Hochformat, auch gedreht). Jedes Display ist ein Unterkonto und bekommt automatisch einen **eigenen Gerätecode**.
 
 Die Karte wird automatisch geladen, ein manueller Ressourcen-Eintrag ist nicht nötig. Jedes Display bekommt außerdem einen Sensor **„Verbunden“** (z. B. für eine Automatisierung „Display offline“).
 
@@ -85,8 +87,14 @@ device: Küche      # optional: ohne Angabe wählst du das Display in der Karte 
 - Element aus der **Palette** ziehen oder anklicken
 - Auf dem Display-Abbild verschieben (Raster 5 px), an der Ecke **Größe ändern**, Pfeiltasten verschieben (Shift = 5 px), `Entf` löscht
 - Rechts: **Entität**, **Beschriftung**, Einheit, Min/Max, Position und Größe
-- Die Vorschau zeigt die **aktuellen Werte** aus Home Assistant
+- Die Vorschau zeigt die **aktuellen Werte** aus Home Assistant und hat die Form deines Displays (Quer- oder Hochformat)
 - **Speichern** prüft das Layout in Home Assistant und schickt es sofort ans Display
+
+### Seiten und Seitenwechsel
+
+- Über der Fläche stehen die **Seiten** als Reiter, mit **+** legst du eine neue an (bis zu 8). Ist kein Element ausgewählt, kannst du rechts die Seite **umbenennen, verschieben, duplizieren oder löschen**.
+- Jede Seite hat ihre eigenen Elemente (bis 32). Das Display zeigt immer eine Seite.
+- Das Element **Seitenwechsel** aus der Palette bringt Pfeile zum Blättern: links `<`, rechts `>`, in der Mitte der Seitenname oder „2 / 3“. **Position und Größe bestimmst du frei**, es liegt auf allen Seiten an derselben Stelle und erscheint am Display erst, wenn es mindestens 2 Seiten gibt. Blättern geht im Kreis.
 
 | Element | Zweck | Bedienung am Display |
 |---|---|---|
@@ -95,8 +103,13 @@ device: Küche      # optional: ohne Angabe wählst du das Display in der Karte 
 | Anzeige | Ringanzeige mit Min/Max | – |
 | Schalter | Ein/Aus | tippen: ein-/ausschalten |
 | Balken | Fortschrittsbalken mit Wert | – |
+| Seitenwechsel | `<` Name `>` | tippen: nächste/vorherige Seite |
 
-Grenzen: höchstens 32 Elemente, Beschriftung ≤ 31 und Einheit ≤ 15 Bytes (Umlaute und ° zählen doppelt). Umlaute, `°` und `€` werden dargestellt.
+Grenzen: höchstens 8 Seiten mit je 32 Elementen, Beschriftung und Seitenname ≤ 31 und Einheit ≤ 15 Bytes (Umlaute und ° zählen doppelt). Umlaute, `°` und `€` werden dargestellt.
+
+### Ausrichtung
+
+Unter **Display bearbeiten** wählst du, wie das Display eingebaut ist (Querformat, Hochformat 90°, Querformat 180°, Hochformat 270°). Die Karte zeigt die Fläche entsprechend, und bei einem Wechsel wird dein Layout automatisch auf die neue Größe angepasst (Elemente werden verschoben oder verkleinert, nichts geht verloren). **Der Touch muss nach einem Wechsel einmal neu kalibriert werden** – das Display fragt automatisch danach. Für jede Ausrichtung wird die Kalibrierung getrennt gespeichert.
 
 ## So funktioniert es
 

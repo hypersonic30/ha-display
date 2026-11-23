@@ -31,7 +31,7 @@ int ha_check(const Config &cfg);
 // Called for every state of a widget entity (snapshot and changes).
 typedef void (*state_cb_t)(const char *entity_id, const char *state);
 
-// Called for every layout frame: {widgets, settings{brightness}, rev, name}.
+// Called for every layout frame: {widgets, settings{brightness, rotation}, screen, page, pager, rev, name}.
 typedef void (*layout_cb_t)(JsonObjectConst frame);
 
 void     ha_client_begin(const Config &cfg, state_cb_t on_state, layout_cb_t on_layout);
@@ -43,3 +43,6 @@ const char *ha_client_error();
 // Touch actions: the integration maps the widget id to the service call.
 void ha_client_tap(const char *widget_id);
 void ha_client_set(const char *widget_id, bool on);
+
+// Page switch (dir > 0: next, dir < 0: previous). The integration answers with a new layout frame.
+void ha_client_page(int dir);

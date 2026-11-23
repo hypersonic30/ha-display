@@ -229,6 +229,69 @@ static void build_bar(Widget &wg, JsonObjectConst j) {
     lv_obj_align(wg.value_lbl, LV_ALIGN_TOP_RIGHT, 0, 0);
 }
 
+// ── Page switcher ─────────────────────────────────────────────────────────────
+
+static void cb_page(lv_event_t *e) {
+    static uint32_t last = 0;
+    uint32_t now = millis();
+    if (now - last < 250) return;   // a double tap must not skip a page
+    last = now;
+    ha_client_page((int)(intptr_t)lv_event_get_user_data(e));
+}
+
+static void pager_zone(lv_obj_t *card, int w, int h, bool left, const char *symbol, const lv_font_t *font) {
+    lv_obj_t *z = lv_obj_create(card);
+    lv_obj_set_size(z, w, h);
+    lv_obj_align(z, left ? LV_ALIGN_LEFT_MID : LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_set_style_bg_color(z, C_OFF, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(z, C_ACCENT, (lv_style_selector_t)(LV_PART_MAIN | LV_STATE_PRESSED));
+    lv_obj_set_style_border_width(z, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(z, 10, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(z, 0, LV_PART_MAIN);
+    lv_obj_clear_flag(z, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(z, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(z, cb_page, LV_EVENT_CLICKED, (void *)(intptr_t)(left ? -1 : 1));
+
+    lv_obj_t *l = lv_label_create(z);
+    lv_obj_set_style_text_font(l, font, LV_PART_MAIN);
+    lv_obj_set_style_text_color(l, C_WHITE, LV_PART_MAIN);
+    lv_label_set_text(l, symbol);
+    lv_obj_center(l);
+}
+
+// "<  Name  >" at the position and size chosen in the layout. Built last, so it lies above the widgets.
+static void build_pager(JsonObjectConst pg, JsonObjectConst page) {
+    int x = pg["x"] | 0, y = pg["y"] | 0, w = pg["w"] | 200, h = pg["h"] | 44;
+    if (w < 72) w = 72;
+    if (h < 24) h = 24;
+
+    int index = page["index"] | 0, count = page["count"] | 1;
+    char text[48];
+    const char *name = page["name"] | "";
+    if (strcmp(pg["mode"] | "name", "count") == 0 || !name[0]) snprintf(text, sizeof(text), "%d / %d", index + 1, count);
+    else                                                        copy_utf8(text, name, sizeof(text));
+
+    lv_obj_t *card = make_card(x, y, w, h);
+    lv_obj_set_style_pad_all(card, 0, LV_PART_MAIN);
+
+    int aw = (int)(h * 1.2f);
+    if (aw > w / 3) aw = w / 3;
+    if (aw < 24) aw = 24;
+    const lv_font_t *arrow = h >= 30 ? &ui_font_24 : &ui_font_16;
+    pager_zone(card, aw, h, true,  "<", arrow);
+    pager_zone(card, aw, h, false, ">", arrow);
+
+    const lv_font_t *font = h >= 48 ? &ui_font_20 : h >= 32 ? &ui_font_16 : &ui_font_14;
+    lv_obj_t *lbl = lv_label_create(card);
+    lv_obj_set_style_text_font(lbl, font, LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl, C_WHITE, LV_PART_MAIN);
+    lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_label_set_long_mode(lbl, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(lbl, w - 2 * aw - 8);
+    lv_label_set_text(lbl, text);
+    lv_obj_align(lbl, LV_ALIGN_CENTER, 0, 0);
+}
+
 // ── State update helpers ──────────────────────────────────────────────────────
 
 static void update_label(Widget &wg, const char *state) {
@@ -267,7 +330,7 @@ void widgets_reset() {
     _count = 0;
 }
 
-int widgets_build(JsonArrayConst layout, const char *device_name) {
+int widgets_build(JsonObjectConst frame, const char *device_name) {
     init_styles();
     lv_obj_t *scr = lv_scr_act();
     lv_obj_clean(scr);
@@ -275,7 +338,7 @@ int widgets_build(JsonArrayConst layout, const char *device_name) {
     lv_obj_set_style_bg_color(scr, C_BG, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, LV_PART_MAIN);
 
-    for (JsonObjectConst j : layout) {
+    for (JsonObjectConst j : frame["widgets"].as<JsonArrayConst>()) {
         if (_count >= 32) break;
 
         Widget &wg = _w[_count];
@@ -299,19 +362,30 @@ int widgets_build(JsonArrayConst layout, const char *device_name) {
     }
 
     if (_count == 0) {
+        int w = lv_disp_get_hor_res(NULL) - 40;
         lv_obj_t *name = lv_label_create(scr);
         lv_obj_set_style_text_font(name, &ui_font_24, LV_PART_MAIN);
         lv_obj_set_style_text_color(name, C_ACCENT, LV_PART_MAIN);
+        lv_obj_set_style_text_align(name, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+        lv_label_set_long_mode(name, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(name, w);
         lv_label_set_text(name, device_name);
-        lv_obj_align(name, LV_ALIGN_CENTER, 0, -20);
+        lv_obj_align(name, LV_ALIGN_CENTER, 0, -30);
 
         lv_obj_t *hint = lv_label_create(scr);
         lv_obj_set_style_text_font(hint, &ui_font_16, LV_PART_MAIN);
         lv_obj_set_style_text_color(hint, C_MUTED, LV_PART_MAIN);
-        lv_label_set_text(hint, "Kein Layout \xE2\x80\x93 in Home Assistant konfigurieren");
+        lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+        lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(hint, w);
+        lv_label_set_text(hint, "Keine Elemente auf dieser Seite \xE2\x80\x93 in Home Assistant konfigurieren");
         lv_obj_align(hint, LV_ALIGN_CENTER, 0, 20);
     }
-    Serial.printf("[UI] built %d widgets\n", _count);
+
+    JsonObjectConst pager = frame["pager"].as<JsonObjectConst>();
+    if (!pager.isNull()) build_pager(pager, frame["page"].as<JsonObjectConst>());
+
+    Serial.printf("[UI] built %d widgets%s\n", _count, pager.isNull() ? "" : " + pager");
     return _count;
 }
 

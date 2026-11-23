@@ -1,8 +1,9 @@
 // ESP32 Display card: visual layout editor for the panels set up in the "ESP32 Display" integration.
 // Talks to Home Assistant only through the integration's WebSocket commands (display/...).
 
-const CARD_VERSION = "0.2.2";
-const SCREEN_W = 480, SCREEN_H = 320, GRID = 5, MAX_WIDGETS = 32, MIN_SIZE = 20;
+const CARD_VERSION = "0.3.0";
+const GRID = 5, MAX_WIDGETS = 32, MAX_PAGES = 8, MIN_SIZE = 20, PAGER_MIN_W = 60, PAGER_MIN_H = 24;
+const PAGER_ID = "__pager";
 
 const TYPES = {
   label:  { icon: "Aa", name: "Wert",     w: 180, h: 70,  domains: null },
@@ -10,11 +11,14 @@ const TYPES = {
   gauge:  { icon: "◔",  name: "Anzeige",  w: 150, h: 150, domains: ["sensor", "input_number", "number"] },
   switch: { icon: "⇆",  name: "Schalter", w: 170, h: 60,  domains: ["light", "switch", "input_boolean", "fan", "automation"] },
   bar:    { icon: "▬",  name: "Balken",   w: 210, h: 60,  domains: ["sensor", "input_number", "number"] },
+  pager:  { icon: "‹ ›", name: "Seitenwechsel", w: 220, h: 40, domains: null },
 };
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const snap = (v) => Math.round(v / GRID) * GRID;
+// The firmware stores texts in fixed byte buffers: cut at a byte limit (umlauts count double), never inside a character.
+const cutBytes = (s, max) => { let out = ""; for (const ch of String(s)) { if (new TextEncoder().encode(out + ch).length > max) break; out += ch; } return out; };
 const num = (v, fallback) => (Number.isFinite(parseFloat(v)) ? parseFloat(v) : fallback);
 
 const STYLE = `
@@ -41,7 +45,7 @@ const STYLE = `
 .stage { flex: 1 1 360px; min-width: 0; padding: 14px; background: var(--secondary-background-color); display: flex; justify-content: center; align-items: flex-start; }
 .screen { position: relative; flex: none; background: #0f0f1a; border-radius: 6px; box-shadow: 0 3px 16px rgba(0,0,0,.45); overflow: hidden; outline: none; touch-action: none; }
 .screen:focus-visible { box-shadow: 0 0 0 2px var(--primary-color); }
-.canvas { position: absolute; left: 0; top: 0; width: ${SCREEN_W}px; height: ${SCREEN_H}px; transform-origin: 0 0;
+.canvas { position: absolute; left: 0; top: 0; width: 480px; height: 320px; transform-origin: 0 0;
   background-image: radial-gradient(#ffffff14 1px, transparent 1px); background-size: ${GRID * 4}px ${GRID * 4}px; }
 .w { position: absolute; background: #1a1a2e; border-radius: 10px; border: 2px solid transparent; padding: 8px; overflow: hidden; cursor: grab; touch-action: none; user-select: none; color: #e0e0e0; font-family: sans-serif; }
 .w.sel { border-color: #4fc3f7; }
@@ -59,6 +63,15 @@ const STYLE = `
 .w.bar .v { top: 6px; bottom: auto; left: auto; font-size: 14px; color: #777799; }
 .track { position: absolute; left: 8px; right: 8px; bottom: 8px; height: 12px; border-radius: 6px; background: #2a2a44; pointer-events: none; }
 .track i { display: block; height: 100%; border-radius: 6px; background: #4fc3f7; }
+.w.pager { display: flex; align-items: center; padding: 0; background: #1a1a2e; }
+.w.pager .ar { flex: none; text-align: center; font-size: 24px; color: #4fc3f7; pointer-events: none; }
+.w.pager .pl { flex: 1; min-width: 0; text-align: center; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+.w.pager.idle:not(.sel) { opacity: .55; border: 2px dashed #4fc3f788; }
+.pagebar { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 14px; border-bottom: 1px solid var(--divider-color); align-items: center; }
+.chip { border: 1px solid var(--divider-color); background: var(--secondary-background-color); color: var(--primary-text-color); border-radius: 16px; padding: 5px 14px; font-size: 13px; cursor: pointer; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip.on { background: var(--primary-color); color: var(--text-primary-color, #fff); border-color: transparent; }
+.chip.add { padding: 5px 11px; font-size: 15px; } .chip:disabled { opacity: .4; cursor: default; }
+.dim { color: var(--secondary-text-color); font-size: 12px; }
 .rz { position: absolute; right: 0; bottom: 0; width: 18px; height: 18px; cursor: nwse-resize; touch-action: none; }
 .rz::after { content: ""; position: absolute; right: 3px; bottom: 3px; width: 8px; height: 8px; border-right: 2px solid #4fc3f7; border-bottom: 2px solid #4fc3f7; }
 .props { flex: 0 0 230px; padding: 14px; border-left: 1px solid var(--divider-color); }
@@ -81,12 +94,20 @@ class DisplayCard extends HTMLElement {
     this._config = {};
     this._devices = [];
     this._deviceId = null;
-    this._widgets = [];
+    this._pages = [{ id: "p1", name: "Seite 1", widgets: [] }];
+    this._page = 0;
+    this._pager = null;
+    this._screen = { w: 480, h: 320 };
     this._selected = null;
     this._dirty = false;
     this._scale = 1;
     this._sig = "";
   }
+
+  get _W() { return this._screen.w; }
+  get _H() { return this._screen.h; }
+  get _widgets() { return this._pages[this._page].widgets; }
+  set _widgets(v) { this._pages[this._page].widgets = v; }
 
   setConfig(config) { this._config = config || {}; }
   getCardSize() { return 8; }
@@ -128,12 +149,14 @@ class DisplayCard extends HTMLElement {
         <div class="bar">
           <span class="dot" id="dot" title="Display verbunden?"></span>
           <select id="dev" ${fixed ? "disabled" : ""}>${this._devices.map((d) => `<option value="${esc(d.id)}">${esc(d.name)}</option>`).join("")}</select>
+          <span class="dim" id="res"></span>
           <button class="btn" id="setup">Einrichtung</button>
           <button class="btn" id="reload" title="Gespeicherten Stand neu laden">↻</button>
           <button class="btn primary" id="save" disabled>Speichern</button>
         </div>
         <div id="setupbox"></div>
         <div id="msg"></div>
+        <div class="pagebar" id="pages"></div>
         <div class="body">
           <div class="palette">${Object.entries(TYPES).map(([t, d]) => `<div class="pi" draggable="true" data-type="${t}" title="Ziehen oder anklicken"><b>${d.icon}</b>${d.name}</div>`).join("")}</div>
           <div class="stage"><div class="screen" id="screen" tabindex="0"><div class="canvas" id="canvas"></div></div></div>
@@ -148,7 +171,7 @@ class DisplayCard extends HTMLElement {
     $("setup").addEventListener("click", () => this._toggleSetup());
     this.shadowRoot.querySelectorAll(".pi").forEach((el) => {
       el.addEventListener("dragstart", (e) => e.dataTransfer.setData("text/plain", el.dataset.type));
-      el.addEventListener("click", () => this._add(el.dataset.type, 20, 20));
+      el.addEventListener("click", () => this._add(el.dataset.type, 20, 20, true));
     });
     const screen = $("screen");
     screen.addEventListener("dragover", (e) => e.preventDefault());
@@ -161,19 +184,23 @@ class DisplayCard extends HTMLElement {
     });
     screen.addEventListener("pointerdown", (e) => { if (e.target === screen || e.target.id === "canvas") this._select(null); });
     screen.addEventListener("keydown", (e) => this._key(e));
-    const stage = this.shadowRoot.querySelector(".stage");
-    new ResizeObserver(() => this._fit(stage)).observe(stage);
+    this._stage = this.shadowRoot.querySelector(".stage");
+    new ResizeObserver(() => this._fit(this._stage)).observe(this._stage);
+    this._renderPages();
     this._renderProps();
   }
 
   _fit(stage) {
     const avail = stage.clientWidth - 28;
     if (avail <= 0) return;
-    this._scale = Math.min(1.6, avail / SCREEN_W);
+    this._scale = Math.min(1.6, avail / this._W, 640 / this._H);
     const screen = this.shadowRoot.getElementById("screen");
-    screen.style.width = `${SCREEN_W * this._scale}px`;
-    screen.style.height = `${SCREEN_H * this._scale}px`;
-    this.shadowRoot.getElementById("canvas").style.transform = `scale(${this._scale})`;
+    screen.style.width = `${this._W * this._scale}px`;
+    screen.style.height = `${this._H * this._scale}px`;
+    const canvas = this.shadowRoot.getElementById("canvas");
+    canvas.style.width = `${this._W}px`;
+    canvas.style.height = `${this._H}px`;
+    canvas.style.transform = `scale(${this._scale})`;
   }
 
   // ── Load / save ───────────────────────────────────────────────────────────
@@ -181,16 +208,27 @@ class DisplayCard extends HTMLElement {
   async _load() {
     try {
       const layout = await this._hass.callWS({ type: "display/layout/get", device_id: this._deviceId });
-      this._widgets = layout.widgets;
+      this._applyLayout(layout);
       this._selected = null;
       this._setDirty(false);
       this._message("");
+      this._renderPages();
       this._draw();
       this._renderProps();
       this._refreshDot();
     } catch (err) {
       this._message(`Layout konnte nicht geladen werden: ${err.message || err.code}`, true);
     }
+  }
+
+  _applyLayout(layout) {
+    this._pages = layout.pages.map((p) => ({ id: p.id, name: p.name, widgets: p.widgets.map((w) => ({ ...w })) }));
+    this._pager = layout.pager ? { ...layout.pager, id: PAGER_ID, type: "pager" } : null;
+    this._page = Math.min(this._page, this._pages.length - 1);
+    this._screen = layout.screen;
+    const res = this.shadowRoot.getElementById("res");
+    if (res) res.textContent = `${this._W}×${this._H} ${this._W > this._H ? "Querformat" : "Hochformat"}`;
+    if (this._stage) this._fit(this._stage);
   }
 
   async _reload() {
@@ -204,6 +242,7 @@ class DisplayCard extends HTMLElement {
       return;
     }
     this._deviceId = id;
+    this._page = 0;
     this.shadowRoot.getElementById("setupbox").innerHTML = "";
     await this._load();
   }
@@ -212,8 +251,10 @@ class DisplayCard extends HTMLElement {
     const btn = this.shadowRoot.getElementById("save");
     btn.disabled = true;
     try {
-      const res = await this._hass.callWS({ type: "display/layout/set", device_id: this._deviceId, widgets: this._widgets });
-      this._widgets = res.widgets;
+      const pager = this._pager ? { x: this._pager.x, y: this._pager.y, w: this._pager.w, h: this._pager.h, mode: this._pager.mode } : null;
+      const res = await this._hass.callWS({ type: "display/layout/set", device_id: this._deviceId, pages: this._pages, pager });
+      this._applyLayout(res);
+      this._renderPages();
       this._draw();
       this._renderProps();
       this._setDirty(false);
@@ -282,35 +323,113 @@ class DisplayCard extends HTMLElement {
     return `w${n}`;
   }
 
-  _add(type, x, y) {
-    if (this._widgets.length >= MAX_WIDGETS) return this._message(`Mehr als ${MAX_WIDGETS} Elemente passen nicht auf das Display.`, true);
+  _add(type, x, y, click = false) {
+    if (type === "pager") return this._addPager(x, y, click);
+    if (this._widgets.length >= MAX_WIDGETS) return this._message(`Mehr als ${MAX_WIDGETS} Elemente passen nicht auf eine Seite.`, true);
     const d = TYPES[type];
     const w = { id: this._nextId(), type, entity: "", label: "", unit: type === "bar" ? "%" : "", min: 0, max: 100, w: d.w, h: d.h, x: 0, y: 0 };
-    w.x = clamp(snap(x), 0, SCREEN_W - w.w);
-    w.y = clamp(snap(y), 0, SCREEN_H - w.h);
+    w.x = clamp(snap(x), 0, this._W - w.w);
+    w.y = clamp(snap(y), 0, this._H - w.h);
     this._widgets.push(w);
     this._setDirty(true);
     this._draw();
     this._select(w.id);
   }
 
+  _addPager(x, y, click) {
+    if (!this._pager) {
+      const d = TYPES.pager;
+      const w = Math.min(d.w, this._W);
+      const placed = click;                          // palette click: put it at the bottom, centred
+      this._pager = {
+        id: PAGER_ID, type: "pager", mode: "name", w, h: d.h,
+        x: clamp(snap(placed ? (this._W - w) / 2 : x), 0, this._W - w),
+        y: clamp(snap(placed ? this._H - d.h - 10 : y), 0, this._H - d.h),
+      };
+      this._setDirty(true);
+      this._draw();
+    }
+    this._select(PAGER_ID);
+  }
+
+  _nextPageId() {
+    const used = new Set(this._pages.map((p) => p.id));
+    let n = 1;
+    while (used.has(`p${n}`)) n++;
+    return `p${n}`;
+  }
+
+  _renderPages() {
+    const box = this.shadowRoot.getElementById("pages");
+    if (!box) return;
+    box.innerHTML = this._pages.map((p, i) => `<button class="chip${i === this._page ? " on" : ""}" data-page="${i}" title="${esc(p.name)}">${esc(p.name)}</button>`).join("")
+      + `<button class="chip add" id="pg-add" title="Seite hinzufügen" ${this._pages.length >= MAX_PAGES ? "disabled" : ""}>+</button>`;
+    box.querySelectorAll("[data-page]").forEach((b) => b.addEventListener("click", () => this._gotoPage(+b.dataset.page)));
+    box.querySelector("#pg-add").addEventListener("click", () => this._addPage());
+  }
+
+  _gotoPage(i) {
+    this._page = clamp(i, 0, this._pages.length - 1);
+    this._selected = null;
+    this._renderPages();
+    this._draw();
+    this._renderProps();
+  }
+
+  _addPage(copy = false) {
+    if (this._pages.length >= MAX_PAGES) return;
+    const from = this._pages[this._page];
+    this._pages.splice(this._page + 1, 0, {
+      id: this._nextPageId(),
+      name: cutBytes(copy ? `${from.name} 2` : `Seite ${this._pages.length + 1}`, 31),
+      widgets: copy ? from.widgets.map((w) => ({ ...w })) : [],
+    });
+    this._setDirty(true);
+    this._gotoPage(this._page + 1);
+  }
+
+  _deletePage() {
+    if (this._pages.length < 2) return;
+    if (this._widgets.length && !confirm(`Seite „${this._pages[this._page].name}“ mit ${this._widgets.length} Elementen löschen?`)) return;
+    this._pages.splice(this._page, 1);
+    this._setDirty(true);
+    this._gotoPage(Math.min(this._page, this._pages.length - 1));
+  }
+
+  _movePage(dir) {
+    const to = this._page + dir;
+    if (to < 0 || to >= this._pages.length) return;
+    [this._pages[this._page], this._pages[to]] = [this._pages[to], this._pages[this._page]];
+    this._setDirty(true);
+    this._gotoPage(to);
+  }
+
   _remove(id) {
+    if (id === PAGER_ID) {
+      this._pager = null;
+      this._setDirty(true);
+      this._select(null);
+      this._draw();
+      return;
+    }
     this._widgets = this._widgets.filter((w) => w.id !== id);
     this._setDirty(true);
     this._select(null);
     this._draw();
   }
 
-  _find(id) { return this._widgets.find((w) => w.id === id); }
+  _find(id) { return id === PAGER_ID ? this._pager : this._widgets.find((w) => w.id === id); }
 
   _select(id) {
     this._selected = id;
-    for (const w of this._widgets) {
+    for (const w of this._items()) {
       const el = this.shadowRoot.querySelector(`.w[data-id="${w.id}"]`);
       if (el) this._paint(el, w);
     }
     this._renderProps();
   }
+
+  _items() { return this._pager ? [...this._widgets, this._pager] : this._widgets; }
 
   _key(e) {
     const w = this._find(this._selected);
@@ -320,8 +439,8 @@ class DisplayCard extends HTMLElement {
     const move = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[e.key];
     if (!move) return;
     e.preventDefault();
-    w.x = clamp(w.x + move[0], 0, SCREEN_W - w.w);
-    w.y = clamp(w.y + move[1], 0, SCREEN_H - w.h);
+    w.x = clamp(w.x + move[0], 0, this._W - w.w);
+    w.y = clamp(w.y + move[1], 0, this._H - w.h);
     this._place(w);
     this._setDirty(true);
     this._syncProps();
@@ -333,7 +452,7 @@ class DisplayCard extends HTMLElement {
     const canvas = this.shadowRoot.getElementById("canvas");
     if (!canvas) return;
     canvas.innerHTML = "";
-    for (const w of this._widgets) {
+    for (const w of this._items()) {
       const el = document.createElement("div");
       el.dataset.id = w.id;
       canvas.appendChild(el);
@@ -351,7 +470,19 @@ class DisplayCard extends HTMLElement {
 
   _state(w) { return w.entity ? this._hass?.states?.[w.entity]?.state : undefined; }
 
+  _paintPager(el, w) {
+    const alone = this._pages.length < 2;
+    el.className = `w pager${w.id === this._selected ? " sel" : ""}${alone ? " idle" : ""}`;
+    this._place(w);
+    const arrow = Math.max(24, Math.min(w.h * 1.2, w.w / 3));
+    const label = w.mode === "count" ? `${this._page + 1} / ${this._pages.length}` : esc(this._pages[this._page].name);
+    el.title = alone ? "Am Display erst ab 2 Seiten sichtbar" : "";
+    el.innerHTML = `<span class="ar" style="width:${arrow}px">&lt;</span><span class="pl">${label}</span><span class="ar" style="width:${arrow}px">&gt;</span>`
+      + (w.id === this._selected ? '<div class="rz"></div>' : "");
+  }
+
   _paint(el, w) {
+    if (w.type === "pager") return this._paintPager(el, w);
     el.className = `w ${w.type}${w.id === this._selected ? " sel" : ""}`;
     this._place(w);
     const title = esc(w.label || w.entity || TYPES[w.type].name);
@@ -382,7 +513,7 @@ class DisplayCard extends HTMLElement {
   }
 
   _signature() {
-    return this._widgets.map((w) => `${w.id}:${this._state(w)}`).join("|");
+    return `${this._page}|` + this._widgets.map((w) => `${w.id}:${this._state(w)}`).join("|");
   }
 
   _refreshValues() {
@@ -390,7 +521,7 @@ class DisplayCard extends HTMLElement {
     const sig = this._signature();
     if (sig !== this._sig) {
       this._sig = sig;
-      for (const w of this._widgets) {
+      for (const w of this._items()) {
         const el = this.shadowRoot.querySelector(`.w[data-id="${w.id}"]`);
         if (el) this._paint(el, w);
       }
@@ -412,12 +543,12 @@ class DisplayCard extends HTMLElement {
         if (!moved && Math.hypot(dx, dy) < 3) return;
         moved = true;
         if (resizing) {
-          w.w = clamp(snap(start.ww + dx), MIN_SIZE, SCREEN_W - w.x);
-          w.h = clamp(snap(start.wh + dy), MIN_SIZE, SCREEN_H - w.y);
+          w.w = clamp(snap(start.ww + dx), w.type === "pager" ? PAGER_MIN_W : MIN_SIZE, this._W - w.x);
+          w.h = clamp(snap(start.wh + dy), w.type === "pager" ? PAGER_MIN_H : MIN_SIZE, this._H - w.y);
           this._paint(el, w);
         } else {
-          w.x = clamp(snap(start.wx + dx), 0, SCREEN_W - w.w);
-          w.y = clamp(snap(start.wy + dy), 0, SCREEN_H - w.h);
+          w.x = clamp(snap(start.wx + dx), 0, this._W - w.w);
+          w.y = clamp(snap(start.wy + dy), 0, this._H - w.h);
           this._place(w);
         }
         this._setDirty(true);
@@ -440,10 +571,8 @@ class DisplayCard extends HTMLElement {
     const panel = this.shadowRoot.getElementById("props");
     if (!panel) return;
     const w = this._find(this._selected);
-    if (!w) {
-      panel.innerHTML = `<div class="empty">Element aus der Palette ziehen oder anklicken.<br>Auf dem Display auswählen, dann Entität und Beschriftung festlegen.<br><br>${this._widgets.length} von ${MAX_WIDGETS} Elementen.<br>Pfeiltasten verschieben, Entf löscht.</div>`;
-      return;
-    }
+    if (!w) return this._renderPageProps(panel);
+    if (w.type === "pager") return this._renderPagerProps(panel, w);
     const numeric = w.type === "gauge" || w.type === "bar";
     panel.innerHTML = `<h3>${TYPES[w.type].name}</h3>
       <div class="field"><label>Entität</label><input id="p-entity" list="p-ents" value="${esc(w.entity)}" placeholder="sensor.temperatur" autocomplete="off"><datalist id="p-ents">${this._entityIds(w.type).map((id) => `<option value="${esc(id)}">`).join("")}</datalist></div>
@@ -460,15 +589,57 @@ class DisplayCard extends HTMLElement {
       if (el) this._paint(el, w);
     });
     bind("#p-entity", (v) => { w.entity = v.trim(); this._sig = ""; });
-    bind("#p-label", (v) => { w.label = v; });
-    bind("#p-unit", (v) => { w.unit = v; });
+    bind("#p-label", (v) => { w.label = cutBytes(v, 31); });
+    bind("#p-unit", (v) => { w.unit = cutBytes(v, 15); });
     bind("#p-min", (v) => { w.min = Math.round(num(v, 0)); });
     bind("#p-max", (v) => { w.max = Math.round(num(v, 100)); });
-    bind("#p-x", (v) => { w.x = clamp(Math.round(num(v, 0)), 0, SCREEN_W - w.w); });
-    bind("#p-y", (v) => { w.y = clamp(Math.round(num(v, 0)), 0, SCREEN_H - w.h); });
-    bind("#p-w", (v) => { w.w = clamp(Math.round(num(v, w.w)), MIN_SIZE, SCREEN_W - w.x); });
-    bind("#p-h", (v) => { w.h = clamp(Math.round(num(v, w.h)), MIN_SIZE, SCREEN_H - w.y); });
+    bind("#p-x", (v) => { w.x = clamp(Math.round(num(v, 0)), 0, this._W - w.w); });
+    bind("#p-y", (v) => { w.y = clamp(Math.round(num(v, 0)), 0, this._H - w.h); });
+    bind("#p-w", (v) => { w.w = clamp(Math.round(num(v, w.w)), MIN_SIZE, this._W - w.x); });
+    bind("#p-h", (v) => { w.h = clamp(Math.round(num(v, w.h)), MIN_SIZE, this._H - w.y); });
     panel.querySelector("#p-del").addEventListener("click", () => this._remove(w.id));
+  }
+
+  _renderPageProps(panel) {
+    const page = this._pages[this._page];
+    panel.innerHTML = `<h3>Seite ${this._page + 1} von ${this._pages.length}</h3>
+      <div class="field"><label>Name der Seite</label><input id="pg-name" value="${esc(page.name)}" placeholder="z. B. Wohnzimmer"></div>
+      <div class="two"><button class="btn" id="pg-left" ${this._page === 0 ? "disabled" : ""}>◀ Nach vorn</button><button class="btn" id="pg-right" ${this._page === this._pages.length - 1 ? "disabled" : ""}>Nach hinten ▶</button></div>
+      <div class="two" style="margin-top:6px"><button class="btn" id="pg-dup" ${this._pages.length >= MAX_PAGES ? "disabled" : ""}>Duplizieren</button><button class="btn danger" id="pg-del" ${this._pages.length < 2 ? "disabled" : ""}>Löschen</button></div>
+      <div class="empty" style="margin-top:12px">${this._widgets.length} von ${MAX_WIDGETS} Elementen auf dieser Seite.<br>Element aus der Palette ziehen oder anklicken, dann Entität und Beschriftung festlegen.<br>Pfeiltasten verschieben, Entf löscht.<br><br>Mit dem <b>Seitenwechsel</b> aus der Palette bekommt das Display Pfeile zum Blättern. Position und Größe bestimmst du frei; er gilt für alle Seiten.</div>`;
+    panel.querySelector("#pg-name").addEventListener("input", (e) => {
+      e.target.value = cutBytes(e.target.value, 31);
+      page.name = e.target.value;
+      this._setDirty(true);
+      this._renderPages();
+      const el = this.shadowRoot.querySelector(`.w[data-id="${PAGER_ID}"]`);
+      if (el) this._paint(el, this._pager);
+    });
+    panel.querySelector("#pg-left").addEventListener("click", () => this._movePage(-1));
+    panel.querySelector("#pg-right").addEventListener("click", () => this._movePage(1));
+    panel.querySelector("#pg-dup").addEventListener("click", () => this._addPage(true));
+    panel.querySelector("#pg-del").addEventListener("click", () => this._deletePage());
+  }
+
+  _renderPagerProps(panel, w) {
+    panel.innerHTML = `<h3>Seitenwechsel</h3>
+      <div class="field"><label>Anzeige in der Mitte</label><select id="p-mode"><option value="name" ${w.mode === "name" ? "selected" : ""}>Name der Seite</option><option value="count" ${w.mode === "count" ? "selected" : ""}>Nummer (2 / 3)</option></select></div>
+      <div class="two"><div class="field"><label>X</label><input id="p-x" type="number" value="${w.x}"></div><div class="field"><label>Y</label><input id="p-y" type="number" value="${w.y}"></div></div>
+      <div class="two"><div class="field"><label>Breite</label><input id="p-w" type="number" value="${w.w}"></div><div class="field"><label>Höhe</label><input id="p-h" type="number" value="${w.h}"></div></div>
+      <div class="empty" style="margin-bottom:10px">Links und rechts tippt man zum Blättern. Das Element liegt auf allen Seiten an derselben Stelle und erscheint am Display erst, wenn es mindestens 2 Seiten gibt.</div>
+      <button class="btn danger" id="p-del">Entfernen</button>`;
+    const bind = (id, apply) => panel.querySelector(id)?.addEventListener("input", (e) => {
+      apply(e.target.value);
+      this._setDirty(true);
+      const el = this.shadowRoot.querySelector(`.w[data-id="${PAGER_ID}"]`);
+      if (el) this._paint(el, w);
+    });
+    bind("#p-mode", (v) => { w.mode = v === "count" ? "count" : "name"; });
+    bind("#p-x", (v) => { w.x = clamp(Math.round(num(v, 0)), 0, this._W - w.w); });
+    bind("#p-y", (v) => { w.y = clamp(Math.round(num(v, 0)), 0, this._H - w.h); });
+    bind("#p-w", (v) => { w.w = clamp(Math.round(num(v, w.w)), PAGER_MIN_W, this._W - w.x); });
+    bind("#p-h", (v) => { w.h = clamp(Math.round(num(v, w.h)), PAGER_MIN_H, this._H - w.y); });
+    panel.querySelector("#p-del").addEventListener("click", () => this._remove(PAGER_ID));
   }
 
   _syncProps() {

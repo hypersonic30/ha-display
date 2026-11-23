@@ -8,7 +8,7 @@ from homeassistant.setup import async_setup_component
 from homeassistant.auth.models import TOKEN_TYPE_LONG_LIVED_ACCESS_TOKEN
 from homeassistant.config_entries import ConfigSubentryData
 
-from custom_components.display.const import CONF_BRIGHTNESS, CONF_DEVICE_KEY, CONF_HA_URL, DOMAIN, SUBENTRY_DEVICE
+from custom_components.display.const import CONF_BRIGHTNESS, CONF_DEVICE_KEY, CONF_HA_URL, CONF_ROTATION, DOMAIN, SUBENTRY_DEVICE
 
 
 @pytest.fixture(autouse=True)
@@ -36,9 +36,9 @@ async def make_token(hass, *, long_lived: bool = True, name: str = "panel", admi
     return hass.auth.async_create_access_token(refresh)
 
 
-def device(name: str, brightness: int = 80, key: str | None = None) -> ConfigSubentryData:
+def device(name: str, brightness: int = 80, key: str | None = None, rotation: int = 0) -> ConfigSubentryData:
     return ConfigSubentryData(
-        data={CONF_BRIGHTNESS: brightness, CONF_DEVICE_KEY: key or f"key-{name.lower()}"},
+        data={CONF_BRIGHTNESS: brightness, CONF_ROTATION: rotation, CONF_DEVICE_KEY: key or f"key-{name.lower()}"},
         subentry_type=SUBENTRY_DEVICE,
         title=name,
         unique_id=name.lower(),

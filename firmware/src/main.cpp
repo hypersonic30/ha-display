@@ -16,10 +16,18 @@ static const uint32_t HOLD_MS       = 3000;
 
 TFT_eSPI tft = TFT_eSPI();
 static lv_disp_draw_buf_t draw_buf;
-static lv_color_t         buf[LV_HOR_RES_MAX * 32];
+static lv_color_t         buf[LV_HOR_RES_MAX * 32];   // fits 480x32 as well as 320x48 lines
+static lv_disp_drv_t      disp_drv;
+static lv_disp_t         *disp = nullptr;
 
 static uint16_t touch_x = 0, touch_y = 0;
 static uint32_t press_since = 0;   // 0 = not pressed
+
+// Screen rotation 0..3 (0 = landscape 480x320, 1 = portrait 320x480, ...). The layout decides it.
+static int  cur_rotation     = 0;
+static bool calibrate_pending = false;   // set inside a callback, done from loop()
+
+static int tft_rotation(int r) { return (1 + r) % 4; }   // 0 = the original TFT_eSPI rotation 1
 
 static void disp_flush(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *color_p) {
     tft.startWrite();
@@ -57,17 +65,18 @@ static void set_brightness(int percent) {
 }
 
 static void tft_init() {
+    cur_rotation = storage_load_rotation();
     tft.begin();
-    tft.setRotation(1);
+    tft.setRotation(tft_rotation(cur_rotation));
     tft.fillScreen(TFT_BLACK);
     ledcAttach(TFT_BL, 5000, 8);
     set_brightness(DEFAULT_BRIGHTNESS);
 }
 
-// Held for HOLD_MS right after power-up: calibrate the touch again.
+// Held for HOLD_MS right after power-up: calibrate the touch of the current rotation again.
 static bool boot_hold_requested() {
     tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
-    tft.drawCentreString("Touch 3 s halten: Touch neu kalibrieren", 240, 150, 2);
+    tft.drawCentreString("Touch 3 s halten: Touch neu kalibrieren", tft.width() / 2, tft.height() / 2 - 10, 2);
 
     uint32_t t0 = millis(), held = 0;
     uint16_t x, y;
@@ -85,18 +94,29 @@ static bool boot_hold_requested() {
     return false;
 }
 
+// Blocking: corner markers, then store the result for the current rotation. The XPT2046 mapping differs
+// per rotation, so each of the four has its own data.
+static void run_calibration() {
+    uint16_t cal[5];
+    tft.fillScreen(TFT_BLACK);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.drawCentreString("Touch kalibrieren", tft.width() / 2, tft.height() / 2 - 24, 4);
+    tft.drawCentreString("Markierungen an den Ecken antippen", tft.width() / 2, tft.height() / 2 + 16, 2);
+    delay(1500);
+    tft.calibrateTouch(cal, TFT_MAGENTA, TFT_BLACK, 15);
+    storage_save_touch(cur_rotation, cal);
+    tft.setTouch(cal);
+    tft.fillScreen(TFT_BLACK);
+    press_since = 0;
+}
+
 static void touch_init() {
     uint16_t cal[5];
-    bool have = storage_load_touch(cal);
+    bool have = storage_load_touch(cur_rotation, cal);
     if (have) tft.setTouch(cal);
 
     bool recalibrate = boot_hold_requested();
-    if (!have || recalibrate) {
-        tft.fillScreen(TFT_BLACK);
-        tft.calibrateTouch(cal, TFT_MAGENTA, TFT_BLACK, 15);
-        storage_save_touch(cal);
-        tft.setTouch(cal);
-    }
+    if (!have || recalibrate) run_calibration();
     tft.fillScreen(TFT_BLACK);
 }
 
@@ -104,19 +124,35 @@ static void lvgl_init() {
     lv_init();
     lv_disp_draw_buf_init(&draw_buf, buf, NULL, LV_HOR_RES_MAX * 32);
 
-    static lv_disp_drv_t disp_drv;
     lv_disp_drv_init(&disp_drv);
-    disp_drv.hor_res  = 480;
-    disp_drv.ver_res  = 320;
+    disp_drv.hor_res  = tft.width();
+    disp_drv.ver_res  = tft.height();
     disp_drv.flush_cb = disp_flush;
     disp_drv.draw_buf = &draw_buf;
-    lv_disp_drv_register(&disp_drv);
+    disp = lv_disp_drv_register(&disp_drv);
 
     static lv_indev_drv_t indev_drv;
     lv_indev_drv_init(&indev_drv);
     indev_drv.type    = LV_INDEV_TYPE_POINTER;
     indev_drv.read_cb = touch_read;
     lv_indev_drv_register(&indev_drv);
+}
+
+// Switch the whole display to another rotation at runtime. The caller builds the screen afterwards.
+static void apply_rotation(int r) {
+    cur_rotation = r;
+    storage_save_rotation(r);
+    tft.setRotation(tft_rotation(r));
+    disp_drv.hor_res = tft.width();
+    disp_drv.ver_res = tft.height();
+    lv_disp_drv_update(disp, &disp_drv);
+
+    uint16_t cal[5];
+    if (storage_load_touch(r, cal)) tft.setTouch(cal);
+    else                            calibrate_pending = true;   // from loop(): not inside a WebSocket callback
+    tft.fillScreen(TFT_BLACK);
+    press_since = 0;
+    Serial.printf("[UI] rotation %d (%dx%d)\n", r, (int)tft.width(), (int)tft.height());
 }
 
 // ── AP SSID ───────────────────────────────────────────────────────────────────
@@ -144,16 +180,17 @@ static HaStatus last_ha_status;
 
 static bool    status_screen = false;  // a screen without widgets: hold touch -> setup
 static int32_t built_rev     = -1;     // layout revision currently on screen
+static int     built_page    = -1;     // page index currently on screen
 
 static void screen_connecting(const char *msg) {
     status_screen = true;
-    built_rev = -1;
+    built_rev = -1; built_page = -1;
     ui_show_connecting(msg);
 }
 
 static void screen_error(const char *msg) {
     status_screen = true;
-    built_rev = -1;
+    built_rev = -1; built_page = -1;
     ui_show_error(msg);
     Serial.printf("[ERROR] %s\n", msg);
 }
@@ -163,7 +200,7 @@ static void enter_provisioning() {
     WiFi.disconnect();
     state = PROVISIONING;
     status_screen = false;
-    built_rev = -1;
+    built_rev = -1; built_page = -1;
     provisioning_begin(ap_ssid);
     ui_show_provisioning(ap_ssid, provisioning_ap_pass(), "192.168.4.1");
     Serial.printf("[STATE] -> PROVISIONING  SSID: %s\n", ap_ssid);
@@ -202,11 +239,16 @@ static void on_layout(JsonObjectConst ev) {
     int brightness = ev["settings"]["brightness"] | 0;
     if (brightness > 0) set_brightness(brightness);
 
-    JsonArrayConst widgets = ev["widgets"].as<JsonArrayConst>();
-    int32_t rev = ev["rev"] | 0;
-    if (rev != built_rev) {
-        int n = widgets_build(widgets, ev["name"] | "Display");
-        built_rev = rev;
+    int rotation = constrain((int)(ev["settings"]["rotation"] | cur_rotation), 0, 3);
+    bool rotated = rotation != cur_rotation;
+    if (rotated) apply_rotation(rotation);
+
+    int32_t rev  = ev["rev"] | 0;
+    int     page = ev["page"]["index"] | 0;
+    if (rev != built_rev || page != built_page || rotated) {
+        int n = widgets_build(ev, ev["name"] | "Display");
+        built_rev  = rev;
+        built_page = page;
         status_screen = (n == 0);
     }
 }
@@ -214,7 +256,7 @@ static void on_layout(JsonObjectConst ev) {
 static void enter_running() {
     state = RUNNING;
     status_screen = true;
-    built_rev = -1;
+    built_rev = -1; built_page = -1;
     last_ha_status = HA_CONNECTING;
     ui_show_running(cfg.ha_url);
     ha_client_begin(cfg, on_entity_state, on_layout);
@@ -262,6 +304,11 @@ void setup() {
 // ── Loop ──────────────────────────────────────────────────────────────────────
 
 void loop() {
+    if (calibrate_pending) {
+        calibrate_pending = false;
+        run_calibration();
+        lv_obj_invalidate(lv_scr_act());   // the layout objects are still there, only the pixels are gone
+    }
     lv_task_handler();
 
     if (state != PROVISIONING && status_screen && touch_hold_ms() >= HOLD_MS) {

@@ -7,8 +7,8 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 
 from .const import CONF_DEVICE_KEY, CONF_HA_URL, DOMAIN
-from .devices import brightness_of, device_subentries, get_entry
-from .layouts import LayoutStore, validate_widgets
+from .devices import brightness_of, device_subentries, get_entry, rotation_of, screen_size
+from .layouts import LayoutStore, validate_layout
 
 
 def _store(hass: HomeAssistant) -> LayoutStore:
@@ -16,16 +16,20 @@ def _store(hass: HomeAssistant) -> LayoutStore:
 
 
 def _payload(hass: HomeAssistant, device_id: str) -> dict | None:
+    """Everything the card needs to edit one display."""
     entry = get_entry(hass)
     sub = entry.subentries.get(device_id) if entry else None
     if sub is None:
         return None
     layout = _store(hass).get(device_id)
+    width, height = screen_size(rotation_of(sub))
     return {
         "name": sub.title,
         "rev": layout["rev"],
-        "widgets": layout["widgets"],
-        "settings": {"brightness": brightness_of(sub)},
+        "pages": layout["pages"],
+        "pager": layout["pager"],
+        "screen": {"w": width, "h": height},
+        "settings": {"brightness": brightness_of(sub), "rotation": rotation_of(sub)},
     }
 
 
@@ -65,20 +69,27 @@ def ws_layout_get(hass: HomeAssistant, connection: websocket_api.ActiveConnectio
 
 
 @websocket_api.websocket_command(
-    {vol.Required("type"): "display/layout/set", vol.Required("device_id"): str, vol.Required("widgets"): list}
+    {
+        vol.Required("type"): "display/layout/set",
+        vol.Required("device_id"): str,
+        vol.Required("pages"): list,
+        vol.Optional("pager"): vol.Any(None, dict),
+    }
 )
 @websocket_api.require_admin
 @websocket_api.async_response
 async def ws_layout_set(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
-    if _resolve(hass, connection, msg) is None:
+    sub = _resolve(hass, connection, msg)
+    if sub is None:
         return
+    screen = screen_size(rotation_of(sub))
     try:
-        widgets = validate_widgets(msg["widgets"])
+        pages, pager = validate_layout(msg["pages"], msg.get("pager"), screen)
     except vol.Invalid as err:
         connection.send_error(msg["id"], websocket_api.ERR_INVALID_FORMAT, str(err))
         return
-    rev = await _store(hass).async_set(msg["device_id"], widgets)
-    connection.send_result(msg["id"], {"rev": rev, "widgets": widgets})
+    await _store(hass).async_set(msg["device_id"], pages, pager, screen)
+    connection.send_result(msg["id"], _payload(hass, msg["device_id"]))
 
 
 @websocket_api.websocket_command({vol.Required("type"): "display/setup_info", vol.Required("device_id"): str})

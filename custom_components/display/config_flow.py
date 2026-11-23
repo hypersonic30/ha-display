@@ -14,7 +14,14 @@ from homeassistant.config_entries import (
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.network import NoURLAvailableError, get_url
-from homeassistant.helpers.selector import NumberSelector, NumberSelectorConfig, NumberSelectorMode
+from homeassistant.helpers.selector import (
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
+)
 
 from .const import (
     CONF_BRIGHTNESS,
@@ -22,7 +29,9 @@ from .const import (
     CONF_HA_URL,
     CONF_NAME,
     CONF_NEW_KEY,
+    CONF_ROTATION,
     DEFAULT_BRIGHTNESS,
+    DEFAULT_ROTATION,
     DOMAIN,
     SUBENTRY_DEVICE,
 )
@@ -103,18 +112,25 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
             elif key in others:
                 errors[CONF_NAME] = "name_taken"
             if not errors:
-                data = {CONF_BRIGHTNESS: int(user_input[CONF_BRIGHTNESS]), CONF_DEVICE_KEY: sub.data[CONF_DEVICE_KEY] if sub else new_device_key()}
+                data = {CONF_BRIGHTNESS: int(user_input[CONF_BRIGHTNESS]), CONF_ROTATION: int(user_input[CONF_ROTATION]), CONF_DEVICE_KEY: sub.data[CONF_DEVICE_KEY] if sub else new_device_key()}
                 if sub is not None and user_input.get(CONF_NEW_KEY):
                     data[CONF_DEVICE_KEY] = new_device_key()
                 if sub is not None:
                     return self.async_update_and_abort(entry, sub, title=name, data=data)
                 return self.async_create_entry(title=name, data=data, unique_id=key)
-        shown = {CONF_NAME: sub.title if sub else "", CONF_BRIGHTNESS: sub.data.get(CONF_BRIGHTNESS, DEFAULT_BRIGHTNESS) if sub else DEFAULT_BRIGHTNESS}
+        shown = {
+            CONF_NAME: sub.title if sub else "",
+            CONF_BRIGHTNESS: sub.data.get(CONF_BRIGHTNESS, DEFAULT_BRIGHTNESS) if sub else DEFAULT_BRIGHTNESS,
+            CONF_ROTATION: str(sub.data.get(CONF_ROTATION, DEFAULT_ROTATION)) if sub else str(DEFAULT_ROTATION),
+        }
         shown.update(user_input or {})
         fields: dict = {
             vol.Required(CONF_NAME, default=shown[CONF_NAME]): str,
             vol.Required(CONF_BRIGHTNESS, default=shown[CONF_BRIGHTNESS]): NumberSelector(
                 NumberSelectorConfig(min=5, max=100, step=5, unit_of_measurement="%", mode=NumberSelectorMode.SLIDER)
+            ),
+            vol.Required(CONF_ROTATION, default=str(shown[CONF_ROTATION])): SelectSelector(
+                SelectSelectorConfig(options=["0", "1", "2", "3"], translation_key="rotation", mode=SelectSelectorMode.DROPDOWN)
             ),
         }
         if sub is not None:

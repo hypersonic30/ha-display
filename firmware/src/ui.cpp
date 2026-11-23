@@ -28,8 +28,21 @@ static lv_obj_t *make_label(lv_obj_t *parent, const char *text,
     return l;
 }
 
+// All screens adapt to the current rotation (480x320 or 320x480).
+static int scr_w() { return lv_disp_get_hor_res(NULL); }
+static int scr_h() { return lv_disp_get_ver_res(NULL); }
+
+// A label that wraps at the given width instead of running off the screen.
+static lv_obj_t *wrap_label(lv_obj_t *parent, const char *text, const lv_font_t *font, lv_color_t color, int width) {
+    lv_obj_t *l = make_label(parent, text, font, color);
+    lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(l, width);
+    lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    return l;
+}
+
 static void add_hold_hint(lv_obj_t *scr) {
-    lv_obj_t *h = make_label(scr, HOLD_HINT, &ui_font_12, C_MUTED);
+    lv_obj_t *h = wrap_label(scr, HOLD_HINT, &ui_font_12, C_MUTED, scr_w() - 20);
     lv_obj_align(h, LV_ALIGN_BOTTOM_MID, 0, -10);
 }
 
@@ -42,36 +55,44 @@ void ui_init() {
 void ui_show_provisioning(const char *ap_ssid, const char *ap_pass, const char *url) {
     clear_screen();
     lv_obj_t *scr = lv_scr_act();
+    const int W = scr_w(), H = scr_h();
 
     lv_obj_t *title = make_label(scr, "ESP32 Display", &ui_font_24, C_ACCENT);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
 
+    const int card_w = W - 20 < 440 ? W - 20 : 440;
     lv_obj_t *card = lv_obj_create(scr);
-    lv_obj_set_size(card, 440, 230);
-    lv_obj_align(card, LV_ALIGN_BOTTOM_MID, 0, -14);
+    lv_obj_set_size(card, card_w, H - 56);
+    lv_obj_align(card, LV_ALIGN_BOTTOM_MID, 0, -10);
     lv_obj_set_style_bg_color(card, C_CARD, LV_PART_MAIN);
     lv_obj_set_style_border_width(card, 0, LV_PART_MAIN);
     lv_obj_set_style_radius(card, 12, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(card, 16, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(card, 14, LV_PART_MAIN);
+    lv_obj_set_style_pad_row(card, 8, LV_PART_MAIN);
+    lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
     lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
 
-    lv_obj_t *wifi_lbl = make_label(card, "1. Mit dem WLAN verbinden", &ui_font_14, C_MUTED);
-    lv_obj_align(wifi_lbl, LV_ALIGN_TOP_LEFT, 0, 0);
+    const int inner = card_w - 28;
+    auto left = [&](const char *text, const lv_font_t *font, lv_color_t color) {
+        lv_obj_t *l = make_label(card, text, font, color);
+        lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(l, inner);
+        return l;
+    };
+
+    left("1. Mit dem WLAN verbinden", &ui_font_14, C_MUTED);
 
     char line[96];
     snprintf(line, sizeof(line), "Name:  %s", ap_ssid);
-    lv_obj_t *ssid_lbl = make_label(card, line, &ui_font_16, C_WHITE);
-    lv_obj_align_to(ssid_lbl, wifi_lbl, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 8);
+    left(line, &ui_font_16, C_WHITE);
 
     snprintf(line, sizeof(line), "Passwort:  %s", ap_pass);
-    lv_obj_t *pass_lbl = make_label(card, line, &ui_font_20, C_ACCENT);
-    lv_obj_align_to(pass_lbl, ssid_lbl, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 8);
+    left(line, &ui_font_20, C_ACCENT);
 
-    lv_obj_t *br_lbl = make_label(card, "2. Browser öffnen", &ui_font_14, C_MUTED);
-    lv_obj_align_to(br_lbl, pass_lbl, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 22);
+    lv_obj_t *step2 = left("2. Browser öffnen", &ui_font_14, C_MUTED);
+    lv_obj_set_style_pad_top(step2, 12, LV_PART_MAIN);
 
-    lv_obj_t *url_lbl = make_label(card, url, &ui_font_20, C_ACCENT);
-    lv_obj_align_to(url_lbl, br_lbl, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 6);
+    left(url, &ui_font_20, C_ACCENT);
 }
 
 // ── Connecting screen ─────────────────────────────────────────────────────────
@@ -84,8 +105,7 @@ void ui_show_connecting(const char *msg) {
     lv_obj_set_size(spinner, 60, 60);
     lv_obj_align(spinner, LV_ALIGN_CENTER, 0, -30);
 
-    lv_obj_t *lbl = make_label(scr, msg, &ui_font_16, C_MUTED);
-    lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_t *lbl = wrap_label(scr, msg, &ui_font_16, C_MUTED, scr_w() - 40);
     lv_obj_align(lbl, LV_ALIGN_CENTER, 0, 40);
     add_hold_hint(scr);
 }
@@ -99,10 +119,7 @@ void ui_show_error(const char *msg) {
     lv_obj_t *icon = make_label(scr, "!", &ui_font_24, C_ERR);
     lv_obj_align(icon, LV_ALIGN_CENTER, 0, -60);
 
-    lv_obj_t *lbl = make_label(scr, msg, &ui_font_16, C_ERR);
-    lv_obj_set_width(lbl, 420);
-    lv_label_set_long_mode(lbl, LV_LABEL_LONG_WRAP);
-    lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_t *lbl = wrap_label(scr, msg, &ui_font_16, C_ERR, scr_w() - 40);
     lv_obj_align(lbl, LV_ALIGN_CENTER, 0, 0);
     add_hold_hint(scr);
 }
@@ -116,10 +133,10 @@ void ui_show_running(const char *ha_url) {
     lv_obj_t *lbl = make_label(scr, "Verbinde ...", &ui_font_24, C_ACCENT);
     lv_obj_align(lbl, LV_ALIGN_TOP_MID, 0, 20);
 
-    lv_obj_t *sub = make_label(scr, ha_url, &ui_font_12, C_MUTED);
+    lv_obj_t *sub = wrap_label(scr, ha_url, &ui_font_12, C_MUTED, scr_w() - 20);
     lv_obj_align_to(sub, lbl, LV_ALIGN_OUT_BOTTOM_MID, 0, 6);
 
-    lv_obj_t *placeholder = make_label(scr, "Warte auf Layout ...", &ui_font_16, C_MUTED);
+    lv_obj_t *placeholder = wrap_label(scr, "Warte auf Layout ...", &ui_font_16, C_MUTED, scr_w() - 40);
     lv_obj_align(placeholder, LV_ALIGN_CENTER, 0, 20);
     add_hold_hint(scr);
 }

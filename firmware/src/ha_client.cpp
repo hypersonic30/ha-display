@@ -202,3 +202,12 @@ void ha_client_set(const char *widget_id, bool on) {
     ws_send(doc);
     Serial.printf("[HA] set %s %d\n", widget_id, on);
 }
+
+void ha_client_page(int dir) {
+    if (!_connected || !_have_layout || dir == 0) return;
+    JsonDocument doc;
+    doc["type"] = "page";
+    doc["dir"]  = dir > 0 ? "next" : "prev";
+    ws_send(doc);
+    Serial.printf("[HA] page %s\n", dir > 0 ? "next" : "prev");
+}

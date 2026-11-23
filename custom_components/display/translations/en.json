@@ -42,11 +42,13 @@
           "description": "The display gets its own device code, shown afterwards in the card under “Setup”. Design the layout with the ESP32 Display card.",
           "data": {
             "name": "Name",
-            "brightness": "Brightness"
+            "brightness": "Brightness",
+            "rotation": "Orientation"
           },
           "data_description": {
             "name": "e.g. Kitchen",
-            "brightness": "Backlight strength of this panel"
+            "brightness": "Backlight strength of this panel",
+            "rotation": "How the display is mounted. Try another setting if the picture is upside down or sideways. The layout is fitted automatically on a change; the touch has to be calibrated once more afterwards."
           }
         },
         "reconfigure": {
@@ -54,12 +56,14 @@
           "data": {
             "name": "Name",
             "brightness": "Brightness",
-            "new_key": "Generate a new device code"
+            "new_key": "Generate a new device code",
+            "rotation": "Orientation"
           },
           "data_description": {
             "name": "The name comes from the server - the panel does not need changing.",
             "brightness": "Backlight strength of this panel",
-            "new_key": "Locks out the display that has the old code; it has to be set up again."
+            "new_key": "Locks out the display that has the old code; it has to be set up again.",
+            "rotation": "How the display is mounted. Try another setting if the picture is upside down or sideways. The layout is fitted automatically on a change; the touch has to be calibrated once more afterwards."
           }
         }
       },
@@ -77,6 +81,16 @@
     "binary_sensor": {
       "connected": {
         "name": "Connected"
+      }
+    }
+  },
+  "selector": {
+    "rotation": {
+      "options": {
+        "0": "Landscape",
+        "1": "Portrait (90°)",
+        "2": "Landscape flipped (180°)",
+        "3": "Portrait flipped (270°)"
       }
     }
   }

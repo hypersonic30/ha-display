@@ -8,7 +8,17 @@ from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.core import HomeAssistant
 from homeassistant.util import slugify
 
-from .const import CONF_BRIGHTNESS, CONF_DEVICE_KEY, DEFAULT_BRIGHTNESS, DOMAIN, SUBENTRY_DEVICE
+from .const import (
+    CONF_BRIGHTNESS,
+    CONF_DEVICE_KEY,
+    CONF_ROTATION,
+    DEFAULT_BRIGHTNESS,
+    DEFAULT_ROTATION,
+    DOMAIN,
+    SCREEN_H,
+    SCREEN_W,
+    SUBENTRY_DEVICE,
+)
 
 
 def get_entry(hass: HomeAssistant) -> ConfigEntry | None:
@@ -40,3 +50,12 @@ def find_by_key(entry: ConfigEntry, key: str) -> ConfigSubentry | None:
 
 def brightness_of(sub: ConfigSubentry) -> int:
     return int(sub.data.get(CONF_BRIGHTNESS, DEFAULT_BRIGHTNESS))
+
+
+def rotation_of(sub: ConfigSubentry) -> int:
+    return int(sub.data.get(CONF_ROTATION, DEFAULT_ROTATION)) % 4
+
+
+def screen_size(rotation: int) -> tuple[int, int]:
+    """Pixel size of the screen: 0 and 2 are landscape, 1 and 3 portrait."""
+    return (SCREEN_H, SCREEN_W) if rotation % 2 else (SCREEN_W, SCREEN_H)

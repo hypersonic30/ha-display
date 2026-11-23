@@ -13,7 +13,7 @@ from homeassistant.helpers.typing import ConfigType
 
 from . import websocket_api
 from .const import CARD_FILE, CONF_DEVICE_KEY, DOMAIN, STATIC_PATH
-from .devices import device_subentries
+from .devices import device_subentries, rotation_of, screen_size
 from .layouts import LayoutStore
 from .panel import CLOSE_GONE, DisplayPingView, DisplaySocketView
 
@@ -48,6 +48,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     store: LayoutStore = hass.data[DOMAIN]["store"]
     devices = device_subentries(entry)
     await store.async_prune({sub.subentry_id for sub in devices})
+    for sub in devices:  # a changed orientation: everything has to fit the new screen
+        await store.async_fit(sub.subentry_id, screen_size(rotation_of(sub)))
     # A removed display, or one whose device key was renewed, must not stay connected.
     keys = {sub.subentry_id: sub.data[CONF_DEVICE_KEY] for sub in devices}
     for session in list(hass.data[DOMAIN]["sessions"]):
