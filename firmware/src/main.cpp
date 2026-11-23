@@ -8,6 +8,7 @@
 #include "provisioning.h"
 #include "ui.h"
 #include "ha_client.h"
+#include "widgets.h"
 
 // ── Display & LVGL ────────────────────────────────────────────────────────────
 
@@ -122,13 +123,16 @@ static void enter_testing_ha() {
 static void on_entity_state(const char *entity_id, const char *state_val,
                              JsonObjectConst attributes) {
     Serial.printf("[STATE] %s = %s\n", entity_id, state_val);
-    // TODO: find widget for entity_id, update LVGL label/gauge/etc.
+    widgets_update(entity_id, state_val, attributes);
 }
 
 // ── Layout callback ───────────────────────────────────────────────────────────
 
 static void on_layout(JsonArrayConst widgets) {
-    // Collect entity IDs to subscribe to
+    // Build LVGL widgets
+    widgets_build(widgets);
+
+    // Collect entity IDs and subscribe to state changes
     static const char *entity_ids[32];
     static char        entity_buf[32][64];
     size_t count = 0;
@@ -142,8 +146,6 @@ static void on_layout(JsonArrayConst widgets) {
         }
     }
     if (count) ha_client_subscribe(entity_ids, count);
-
-    // TODO: render initial widget layout on display
 }
 
 static void enter_running() {
