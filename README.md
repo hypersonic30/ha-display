@@ -3,12 +3,14 @@
 Selbstgebautes Touch-Panel (ESP32 + ILI9488 480×320) für Home Assistant. Das Layout gestaltest du **grafisch in Home Assistant** – ohne die Firmware neu zu flashen. Änderungen erscheinen sofort auf dem Display.
 
 - **Eine Integration, beliebig viele Displays** – Geräte sind Unterkonten; **kein Home-Assistant-Token im Display**
-- **Visueller Editor** (Lovelace-Karte): Elemente ziehen, Entität wählen, speichern
+- **Visueller Editor** als Lovelace-Karte **und** als Eintrag in der Seitenleiste: Elemente ziehen, Entität wählen, speichern
+- **15 Elemente**: Wert, Taster, Schalter, Schieber, Drehregler, Anzeige, Balken, LED, Uhr, Auswahl, **Medien**, **Thermostat** u. a.
+- **Farben** frei wählbar: Seitenhintergrund, je Element Farbe aus/an (je nach Zustand der Entität) und Text; Warn-/Kritisch-Schwellen; 36 Symbole
 - **Mehrere Seiten** pro Display mit frei platzierbarem **Seitenwechsel** (Pfeile links/rechts, Seitenname oder Nummer in der Mitte)
 - **Hoch- oder Querformat**, pro Display einstellbar
 - **Firmware-Updates über WLAN (OTA)**, direkt aus der Karte oder aus Home Assistants Update-Seite
 - **Fertige Firmware** zum Flashen, Ersteinrichtung per WLAN-Hotspot am Handy
-- **Live-Werte** und **Touch-Bedienung** (Taster, Schalter) direkt am Display
+- **Live-Werte** und **Touch-Bedienung** (Taster, Schalter, Schieber, Medien, Thermostat) direkt am Display
 - Alles aus einem Repository, Installation über **HACS**
 
 ## Hardware
@@ -83,7 +85,9 @@ Danach verschwindet der Hotspot, das Display verbindet sich und lädt Name, Hell
 
 > Tipp: Kopiere den Einrichtungslink, **bevor** du dich mit dem Hotspot verbindest – danach hat dein Handy meist kein Home Assistant mehr.
 
-### 4. Karte hinzufügen
+### 4. Editor öffnen
+
+Der Editor erscheint nach der Einrichtung als **ESP32 Display in der Seitenleiste** (nur Administratoren; abschaltbar unter *Verbindung bearbeiten*). Alternativ legst du ihn als Karte aufs Dashboard:
 
 Dashboard bearbeiten → Karte hinzufügen → **ESP32 Display** (oder YAML):
 
@@ -94,10 +98,10 @@ device: Küche      # optional: ohne Angabe wählst du das Display in der Karte 
 
 ## Layout-Editor
 
-- Den Editor gibt es zusätzlich als Eintrag **ESP32 Display in der Seitenleiste** (nur für Administratoren, ohne Dashboard-Karte). Abschalten unter *Verbindung bearbeiten → Editor in der Seitenleiste anzeigen*.
 - Element aus der **Palette** ziehen oder anklicken
 - Auf dem Display-Abbild verschieben (Raster 5 px), an der Ecke **Größe ändern**, Pfeiltasten verschieben (Shift = 5 px), `Entf` löscht
-- Rechts: **Entität**, **Beschriftung**, Einheit, Min/Max, Position und Größe
+- Rechts, je nach Element: **Entität**, **Beschriftung**, **Symbol**, **Aktion** (Taster), Attribut statt Zustand, Einheit, Min/Max, Warn-/Kritisch-Schwellen, Uhrformat, **Farben**, Position und Größe
+- Ist kein Element ausgewählt, stellst du rechts die **Hintergrundfarbe der Seite** ein
 - Die Vorschau zeigt die **aktuellen Werte** aus Home Assistant und hat die Form deines Displays (Quer- oder Hochformat)
 - **Speichern** prüft das Layout in Home Assistant und schickt es sofort ans Display
 
@@ -135,10 +139,12 @@ Unter **Display bearbeiten** wählst du, wie das Display eingebaut ist (Querform
 ## So funktioniert es
 
 ```
-Lovelace-Karte ──HA-WebSocket──▶ ┐
+Editor (Karte/Seitenleiste) ──HA-WebSocket──▶ ┐
                                  ├─ Integration „display“ ──▶ Home Assistant (Zustände, Dienste)
 ESP32-Display ──eigener WebSocket▶ ┘     /api/display/ws, Anmeldung mit Gerätecode
 ```
+
+Das Protokoll zwischen Display und Integration steht in [docs/protocol.md](docs/protocol.md).
 
 Das Display hält **eine** Verbindung zur Integration. Die schickt Layout und Zustände der Entitäten im Layout (live) und nimmt Taps entgegen. Welcher Dienst dabei aufgerufen wird, entscheidet die Integration anhand des gespeicherten Layouts – das Display nennt nur die Element-ID.
 
