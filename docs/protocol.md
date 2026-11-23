@@ -27,6 +27,7 @@ default. Always present: `id`, `type`, `x`, `y`, `w`, `h`, `min`, `max`.
 | `bg`     | theme   | `"#rrggbb"`: fill / track / "off" colour |
 | `fg`     | theme   | text colour |
 | `on`     | accent  | colour while the widget is *active* / indicator colour (see below) |
+| `font`   | `0`     | font size of the widget's main text: `0` = automatic (as before), else a pixel size from `12, 14, 16, 20, 24`; `clock` additionally `32, 48` (digits only) |
 | `attr`   | `""`    | show this attribute instead of the state (label/bar/gauge; `[a-z0-9_]{1,23}`) |
 | `icon`   | `""`    | symbol name (table below), button and label |
 | `action` | `""`    | fixed action of a button (server side only; the firmware just sends `act`) |
@@ -36,6 +37,13 @@ default. Always present: `id`, `type`, `x`, `y`, `w`, `h`, `min`, `max`.
 
 Types: `label`, `button`, `gauge`, `switch`, `bar` (existing) and new `slider`, `arc`, `led`, `clock`, `dropdown`,
 `roller`, `checkbox`, `panel`, `media`, `thermostat`.
+
+### Font size
+
+`font` sets the size of the *main* text: the value of a `label`, the text of `button`/`checkbox`/`switch`/`dropdown`/`roller`,
+the title of `media`, the target temperature of `thermostat`, the digits of `clock` (default 32). Secondary texts (small
+titles, artist, unit hints) stay automatic. Only the listed sizes exist (symbols are available in 12..24); the firmware
+picks the largest available size <= the value if it has no exact font. The server only accepts 32/48 for `clock`.
 
 ### Active state
 

@@ -50,6 +50,7 @@ BUTTON_ACTIONS = {
 DEFAULT_ACTION = {"media_player": "play_pause", "cover": "toggle", "vacuum": "start"}
 MEDIA_ACTIONS = ("prev", "play_pause", "next")
 THERMOSTAT_ACTIONS = ("temp_up", "temp_down")
+FONT_SIZES = (0, 12, 14, 16, 20, 24, 32, 48)   # 0 = automatic; 32/48 are digit-only clock fonts
 CLOCK_FORMATS = ("time", "time_s", "date", "datetime")
 ICONS = (
     "power", "home", "bell", "play", "pause", "stop", "next", "prev", "plus", "minus", "up", "down", "left", "right",

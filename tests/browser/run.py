@@ -360,6 +360,26 @@ with sync_playwright() as p:
     pg.click("display-card >> #p-pgbg-x"); pg.wait_for_timeout(50)
     check("Standard clears the page background", sh(pg, "card._pages[1].bg") == "" and pg.evaluate("() => card.shadowRoot.getElementById('screen').style.background") == "")
 
+    # ── font size ─────────────────────────────────────────────────────────────
+    mount(pg, stub(), None, S4)
+    pg.evaluate("() => { card._widgets.length = 0; card._add('label', 10, 10); card._widgets[0].entity = 'sensor.temp'; card._select(null); card._select('w1'); }")
+    opts = sh(pg, "[...r.querySelectorAll('#p-font option')].map(o => o.value)")
+    check("a label offers the font sizes (and automatic)", opts == ["0", "12", "14", "16", "20", "24"], opts)
+    px = lambda sel: pg.evaluate("(q) => getComputedStyle(card.shadowRoot.querySelector(q)).fontSize", sel)
+    auto = px(".w.label .v")
+    pg.select_option("display-card >> #p-font", "24"); pg.wait_for_timeout(50)
+    check("the size changes the preview text", px(".w.label .v") == "24px" and auto != "24px", (auto, px(".w.label .v")))
+    pg.select_option("display-card >> #p-font", "0"); pg.wait_for_timeout(50)
+    check("automatic restores the default", px(".w.label .v") == auto and sh(pg, "card._widgets[0].font") == 0)
+    pg.evaluate("() => { card._widgets.length = 0; card._add('clock', 10, 10); }")
+    check("a clock also offers the two big sizes", "48" in sh(pg, "[...r.querySelectorAll('#p-font option')].map(o => o.value)"))
+    pg.select_option("display-card >> #p-font", "48"); pg.wait_for_timeout(50)
+    check("and applies them", px(".w.clock") == "48px")
+    pg.evaluate("() => { card._widgets.length = 0; card._add('bar', 10, 10); }")
+    check("a bar has no font setting", sh(pg, "r.getElementById('p-font')") is None)
+    pg.evaluate("() => { card._widgets.length = 0; card._add('button', 10, 10); card._widgets[0].label = 'Ok'; card._widgets[0].font = 20; card._setDirty(true); }"); pg.click("display-card >> #save"); pg.wait_for_timeout(300)
+    check("saving sends the font size", calls(pg, "display/layout/set")[-1]["pages"][0]["widgets"][0]["font"] == 20)
+
     # ── sidebar panel ─────────────────────────────────────────────────────────
     mount(pg, stub(), None, STATES)
     pg.add_script_tag(url="/display-panel.js"); pg.wait_for_timeout(200)

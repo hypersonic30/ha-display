@@ -5,7 +5,7 @@ Selbstgebautes Touch-Panel (ESP32 + ILI9488 480×320) für Home Assistant. Das L
 - **Eine Integration, beliebig viele Displays** – Geräte sind Unterkonten; **kein Home-Assistant-Token im Display**
 - **Visueller Editor** als Lovelace-Karte **und** als Eintrag in der Seitenleiste: Elemente ziehen, Entität wählen, speichern
 - **15 Elemente**: Wert, Taster, Schalter, Schieber, Drehregler, Anzeige, Balken, LED, Uhr, Auswahl, **Medien**, **Thermostat** u. a.
-- **Farben** frei wählbar: Seitenhintergrund, je Element Farbe aus/an (je nach Zustand der Entität) und Text; Warn-/Kritisch-Schwellen; 36 Symbole
+- **Farben** frei wählbar: Seitenhintergrund, je Element Farbe aus/an (je nach Zustand der Entität) und Text; Warn-/Kritisch-Schwellen; 36 Symbole; Schriftgröße
 - **Mehrere Seiten** pro Display mit frei platzierbarem **Seitenwechsel** (Pfeile links/rechts, Seitenname oder Nummer in der Mitte)
 - **Hoch- oder Querformat**, pro Display einstellbar
 - **Firmware-Updates über WLAN (OTA)**, direkt aus der Karte oder aus Home Assistants Update-Seite
@@ -100,7 +100,7 @@ device: Küche      # optional: ohne Angabe wählst du das Display in der Karte 
 
 - Element aus der **Palette** ziehen oder anklicken
 - Auf dem Display-Abbild verschieben (Raster 5 px), an der Ecke **Größe ändern**, Pfeiltasten verschieben (Shift = 5 px), `Entf` löscht
-- Rechts, je nach Element: **Entität**, **Beschriftung**, **Symbol**, **Aktion** (Taster), Attribut statt Zustand, Einheit, Min/Max, Warn-/Kritisch-Schwellen, Uhrformat, **Farben**, Position und Größe
+- Rechts, je nach Element: **Entität**, **Beschriftung**, **Symbol**, **Aktion** (Taster), Attribut statt Zustand, Einheit, Min/Max, Warn-/Kritisch-Schwellen, Uhrformat, **Schriftgröße**, **Farben**, Position und Größe
 - Ist kein Element ausgewählt, stellst du rechts die **Hintergrundfarbe der Seite** ein
 - Die Vorschau zeigt die **aktuellen Werte** aus Home Assistant und hat die Form deines Displays (Quer- oder Hochformat)
 - **Speichern** prüft das Layout in Home Assistant und schickt es sofort ans Display
@@ -126,7 +126,7 @@ device: Küche      # optional: ohne Angabe wählst du das Display in der Karte 
 | Thermostat | Ist- und Solltemperatur, `−`/`+` (Schritt und Grenzen aus dem Gerät) | tippen |
 | Seitenwechsel | `<` Name `>` | tippen: nächste/vorherige Seite |
 
-**Farben:** Jede Seite hat eine Hintergrundfarbe, jedes Element Farbe (aus), Farbe (an) und Textfarbe. „Standard“ setzt zurück. Als „an“ gelten die Zustände `on`, `open`, `playing`, `home`, `heat` und ähnliche. **Symbole** (36, z. B. Ein/Aus, Play, Haus) lassen sich bei Taster und Wert setzen. Das Format aller Felder und Nachrichten steht in [docs/protocol.md](docs/protocol.md).
+**Farben:** Jede Seite hat eine Hintergrundfarbe, jedes Element Farbe (aus), Farbe (an) und Textfarbe. „Standard“ setzt zurück. Als „an“ gelten die Zustände `on`, `open`, `playing`, `home`, `heat` und ähnliche. **Symbole** (36, z. B. Ein/Aus, Play, Haus) lassen sich bei Taster und Wert setzen. Die **Schriftgröße** (12 bis 24 px, bei der Uhr bis 48 px) ist für den Haupttext von Wert, Taster, Schalter, Kästchen, Auswahl, Medien, Thermostat und Uhr einstellbar; „Automatisch“ ist die Standardgröße. Das Format aller Felder und Nachrichten steht in [docs/protocol.md](docs/protocol.md).
 
 **Bewusst nicht bedienbar:** Schlösser und Alarmanlagen (ein gestohlenes Display soll keine Tür öffnen). Anzeigen sind möglich.
 

@@ -1,7 +1,7 @@
 // ESP32 Display card: visual layout editor for the panels set up in the "ESP32 Display" integration.
 // Talks to Home Assistant only through the integration's WebSocket commands (display/...).
 
-const CARD_VERSION = "0.4.0";
+const CARD_VERSION = "0.5.0";
 const GRID = 5, MAX_WIDGETS = 32, MAX_PAGES = 8, MIN_SIZE = 20, PAGER_MIN_W = 60, PAGER_MIN_H = 24;
 const PAGER_ID = "__pager";
 
@@ -45,6 +45,9 @@ const ICONS = {
   mute: ["🔇", "Stumm"], audio: ["♪", "Musik"], video: ["🎬", "Video"], list: ["☰", "Liste"], trash: ["🗑", "Papierkorb"], edit: ["✎", "Stift"],
   gps: ["⌖", "Ort"], image: ["🖼", "Bild"], shuffle: ["🔀", "Zufall"], loop: ["🔁", "Wiederholen"], bluetooth: ["ᛒ", "Bluetooth"], usb: ["⭥", "USB"],
 };
+const FONTS = [12, 14, 16, 20, 24];
+const FONT_TYPES = ["label", "button", "switch", "checkbox", "dropdown", "roller", "media", "thermostat", "clock"];
+const fontStyle = (w) => (w.font > 0 ? `font-size:${w.font}px;` : "");
 const FORMATS = [["time", "Uhrzeit 14:05"], ["time_s", "Uhrzeit mit Sekunden"], ["date", "Datum 24.11.2026"], ["datetime", "Datum und Uhrzeit"]];
 const NO_ENTITY = (type) => TYPES[type]?.domains?.length === 0;
 const levelColor = (w, n, base) => {
@@ -431,7 +434,7 @@ class DisplayCard extends HTMLElement {
     const d = TYPES[type];
     const w = {
       id: this._nextId(), type, entity: "", label: "", unit: type === "bar" ? "%" : "", min: 0, max: 100, w: d.w, h: d.h, x: 0, y: 0,
-      bg: "", fg: "", on: "", attr: "", icon: "", action: "", format: "time", warn: null, crit: null, invert: false,
+      bg: "", fg: "", on: "", attr: "", icon: "", action: "", format: "time", font: 0, warn: null, crit: null, invert: false,
     };
     w.x = clamp(snap(x), 0, this._W - w.w);
     w.y = clamp(snap(y), 0, this._H - w.h);
@@ -634,20 +637,20 @@ class DisplayCard extends HTMLElement {
     switch (w.type) {
       case "label":
         if (w.bg) el.style.background = w.bg;
-        inner = `<div class="t">${ic ? ic + " " : ""}${title}</div><div class="v">${shown === undefined ? "--" : esc(shown) + (unit ? " " + unit : "")}</div>`; break;
+        inner = `<div class="t">${ic ? ic + " " : ""}${title}</div><div class="v" style="${fontStyle(w)}">${shown === undefined ? "--" : esc(shown) + (unit ? " " + unit : "")}</div>`; break;
       case "button":
         el.style.background = active ? onc : off;
         if (active && !w.fg) el.style.color = "#0f0f1a";
-        inner = `<div class="v">${ic ? `<span style="font-size:${w.label ? 18 : 28}px;margin-right:${w.label ? 6 : 0}px">${ic}</span>` : ""}${ic && !w.label ? "" : title}</div>`; break;
+        inner = `<div class="v" style="${fontStyle(w)}">${ic ? `<span style="font-size:${w.font || (w.label ? 18 : 28)}px;margin-right:${w.label ? 6 : 0}px">${ic}</span>` : ""}${ic && !w.label ? "" : title}</div>`; break;
       case "gauge": case "arc": {
         const size = Math.max(10, Math.min(w.w, w.h) - 34);
         const text = w.type === "arc" ? (isNum ? Math.round(n) + unit : "--") : (isNum ? n.toFixed(1) + unit : "--");
         inner = `<div class="t" style="text-align:center">${title}</div><div class="ring" style="width:${size}px;height:${size}px;background:conic-gradient(from 225deg,${fill} ${pct * 2.7}deg,${off} 0 270deg,transparent 0)"></div><div class="v" style="text-align:center;bottom:auto;top:50%;transform:translateY(-40%)">${text}</div>`; break;
       }
       case "switch":
-        inner = `<div class="t">${title}</div><div class="pill${active ? " on" : ""}" style="background:${active ? onc : off}"></div>`; break;
+        inner = `<div class="t" style="${fontStyle(w)}">${title}</div><div class="pill${active ? " on" : ""}" style="background:${active ? onc : off}"></div>`; break;
       case "checkbox":
-        inner = `<div class="chk" style="background:${active ? onc : off}">${active ? "✓" : ""}</div><div class="t">${title}</div>`; break;
+        inner = `<div class="chk" style="background:${active ? onc : off}">${active ? "✓" : ""}</div><div class="t" style="${fontStyle(w)}">${title}</div>`; break;
       case "led": {
         const d = Math.max(8, Math.min(w.w, w.h) - 6);
         inner = `<i style="width:${d}px;height:${d}px;background:${active ? onc : off};box-shadow:${active ? `0 0 ${d / 3}px ${onc}` : "none"}"></i>`; break;
@@ -657,11 +660,11 @@ class DisplayCard extends HTMLElement {
       case "slider":
         inner = `<div class="t">${title}</div><div class="v" style="top:6px;bottom:auto;left:auto;font-size:14px;color:${COL.muted}">${isNum ? Math.round(n) + unit : "--"}</div><div class="strack" style="background:${off}"><i style="width:${pct}%;background:${onc}"></i><b style="left:${pct}%"></b></div>`; break;
       case "dropdown":
-        inner = `<div class="t">${title}</div><div class="box" style="background:${off}"><span>${esc(w.entity ? this._selection(w) : "--")}</span><span>▾</span></div>`; break;
+        inner = `<div class="t">${title}</div><div class="box" style="background:${off};${fontStyle(w)}"><span>${esc(w.entity ? this._selection(w) : "--")}</span><span>▾</span></div>`; break;
       case "roller":
-        inner = `<div class="t">${title}</div><div class="box" style="background:${off};justify-content:center;font-size:18px"><span>${esc(w.entity ? this._selection(w) : "--")}</span></div>`; break;
+        inner = `<div class="t">${title}</div><div class="box" style="background:${off};justify-content:center;font-size:${w.font || 18}px"><span>${esc(w.entity ? this._selection(w) : "--")}</span></div>`; break;
       case "clock":
-        inner = esc(clockText(w.format)); if (w.bg) el.style.background = w.bg; break;
+        inner = esc(clockText(w.format)); el.style.fontSize = `${w.font || 30}px`; if (w.bg) el.style.background = w.bg; break;
       case "panel":
         el.style.background = w.bg || COL.card;
         inner = w.label ? `<div class="t">${title}</div>` : ""; break;
@@ -669,14 +672,14 @@ class DisplayCard extends HTMLElement {
         const t = attrs.media_title || (w.entity ? state || "--" : "--");
         const vol = typeof attrs.volume_level === "number" ? Math.round(attrs.volume_level * 100) : 0;
         if (w.bg) el.style.background = w.bg;
-        inner = `<div class="t">${esc(t)}</div><div class="a">${esc(attrs.media_artist || w.label || "")}</div>
+        inner = `<div class="t" style="${fontStyle(w)}">${esc(t)}</div><div class="a">${esc(attrs.media_artist || w.label || "")}</div>
           <div class="ctl" style="top:${Math.round(w.h * 0.38)}px;color:${w.fg || COL.text}"><span>⏮</span><span style="color:${onc}">${state === "playing" ? "⏸" : "▶"}</span><span>⏭</span></div>
           <div class="strack" style="background:${off}"><i style="width:${vol}%;background:${onc}"></i><b style="left:${vol}%"></b></div>`; break;
       }
       case "thermostat": {
         const cur = attrs.current_temperature, tgt = attrs.temperature;
         if (w.bg) el.style.background = w.bg;
-        inner = `<div class="t">${title}${state ? " · " + esc(state) : ""}${cur !== undefined ? " · " + esc(cur) + "°" : ""}</div><div class="thermo"><em style="color:${onc}">−</em><big>${tgt !== undefined && tgt !== null ? esc(tgt) + "°" : "--"}</big><em style="color:${onc}">+</em></div>`; break;
+        inner = `<div class="t">${title}${state ? " · " + esc(state) : ""}${cur !== undefined ? " · " + esc(cur) + "°" : ""}</div><div class="thermo"><em style="color:${onc}">−</em><big style="${fontStyle(w)}">${tgt !== undefined && tgt !== null ? esc(tgt) + "°" : "--"}</big><em style="color:${onc}">+</em></div>`; break;
       }
       default:
         inner = `<div class="t">${title}</div>`;
@@ -777,6 +780,7 @@ class DisplayCard extends HTMLElement {
       ${levels ? `<div class="two"><div class="field"><label>Warnung ab</label><input id="p-warn" type="number" step="any" value="${w.warn ?? ""}"></div><div class="field"><label>Kritisch ab</label><input id="p-crit" type="number" step="any" value="${w.crit ?? ""}"></div></div>
         <label class="check"><input type="checkbox" id="p-invert" ${w.invert ? "checked" : ""}> Schwellen gelten für Werte darunter</label>` : ""}
       ${t === "clock" ? `<div class="field"><label>Format</label><select id="p-format">${FORMATS.map(([v, n2]) => opt(v, n2, w.format)).join("")}</select></div>` : ""}
+      ${FONT_TYPES.includes(t) ? `<div class="field"><label>Schriftgröße</label><select id="p-font">${opt(0, "Automatisch", w.font)}${[...FONTS, ...(t === "clock" ? [32, 48] : [])].map((f) => opt(f, `${f} px`, w.font)).join("")}</select></div>` : ""}
       ${colors[0] ? this._colorField("bg", colors[0], w.bg, COL.off) : ""}
       ${colors[2] ? this._colorField("on", colors[2], w.on, COL.on) : ""}
       ${colors[1] ? this._colorField("fg", colors[1], w.fg, COL.text) : ""}
@@ -802,6 +806,7 @@ class DisplayCard extends HTMLElement {
     bind("#p-invert", (v, el) => { w.invert = el.checked; }, "change");
     bind("#p-format", (v) => { w.format = v; }, "change");
     bind("#p-icon", (v) => { w.icon = v; }, "change");
+    bind("#p-font", (v) => { w.font = Number(v) || 0; }, "change");
     bind("#p-action", (v) => { w.action = v; if (v && !w.icon && ACTION_ICON[v]) w.icon = ACTION_ICON[v]; this._renderProps(); }, "change");
     for (const key of ["bg", "on", "fg"]) {
       bind(`#p-${key}`, (v) => { w[key] = v; });

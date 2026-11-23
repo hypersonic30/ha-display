@@ -29,6 +29,7 @@ struct Widget {
     char       title[32];
     char       attr[24];
     uint8_t    format;
+    int        font;                     // requested size of the main text, 0 = automatic
     int        min_val, max_val;
     int        scale;                    // slider/arc/bar: integer steps per unit (10 for small ranges)
     lv_color_t bg, fg, on;
@@ -190,6 +191,24 @@ static lv_obj_t *make_card(int x, int y, int w, int h, lv_color_t fill = C_CARD)
     return obj;
 }
 
+// The font for the main text: the automatic one for font 0, else the largest of 12/14/16/20/24 that is <= the request.
+static const lv_font_t *font_for(const Widget &wg, const lv_font_t *automatic) {
+    if (wg.font <= 0) return automatic;
+    static const struct { int size; const lv_font_t *font; } T[] = {
+        {24, &ui_font_24}, {20, &ui_font_20}, {16, &ui_font_16}, {14, &ui_font_14}, {12, &ui_font_12}};
+    for (const auto &t : T)
+        if (wg.font >= t.size) return t.font;
+    return &ui_font_12;
+}
+
+// One line of at most `width` pixels: longer text ends in dots instead of wrapping or overflowing.
+static void clip_line(lv_obj_t *lbl, int width, const lv_font_t *font) {
+    if (!lbl) return;
+    lv_label_set_long_mode(lbl, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(lbl, width > 8 ? width : 8);
+    lv_obj_set_height(lbl, lv_font_get_line_height(font));
+}
+
 static lv_obj_t *make_title(Widget &wg, lv_align_t align, int dx = 0, int dy = 0) {
     lv_obj_t *t = lv_label_create(wg.root);
     lv_obj_add_style(t, &s_title, LV_PART_MAIN);
@@ -341,7 +360,7 @@ static void cb_dropdown_open(lv_event_t *e) {
     Widget *wg = (Widget *)lv_event_get_user_data(e);
     lv_obj_t *list = wg && wg->ctl ? lv_dropdown_get_list(wg->ctl) : nullptr;
     if (!list) return;
-    lv_obj_set_style_text_font(list, &ui_font_16, LV_PART_MAIN);
+    lv_obj_set_style_text_font(list, font_for(*wg, &ui_font_16), LV_PART_MAIN);
     lv_obj_set_style_text_color(list, col_fg(*wg, C_WHITE), LV_PART_MAIN);
     lv_obj_set_style_bg_color(list, col_bg(*wg, C_OFF), LV_PART_MAIN);
     lv_obj_set_style_border_width(list, 0, LV_PART_MAIN);
@@ -373,14 +392,17 @@ static void build_label(Widget &wg, JsonObjectConst j) {
     if (!wg.entity_id[0]) {
         // Static text: no value row, the title is the content.
         lv_obj_t *t = make_title(wg, LV_ALIGN_LEFT_MID);
-        lv_obj_set_style_text_font(t, &ui_font_20, LV_PART_MAIN);
+        lv_obj_set_style_text_font(t, font_for(wg, &ui_font_20), LV_PART_MAIN);
         lv_obj_set_style_text_color(t, col_fg(wg, C_WHITE), LV_PART_MAIN);
         lv_label_set_long_mode(t, LV_LABEL_LONG_DOT);
         lv_obj_set_width(t, w - 16 > 8 ? w - 16 : 8);
+        if (wg.font > 0) clip_line(t, w - 16, font_for(wg, &ui_font_20));
         return;
     }
     make_title(wg, LV_ALIGN_TOP_LEFT);
-    make_value(wg, LV_ALIGN_BOTTOM_LEFT, 0, 0, &ui_font_20);
+    const lv_font_t *vf = font_for(wg, &ui_font_20);
+    make_value(wg, LV_ALIGN_BOTTOM_LEFT, 0, 0, vf);
+    if (wg.font > 0) clip_line(wg.value_lbl, w - 16, vf);
 }
 
 static void build_button(Widget &wg, JsonObjectConst j) {
@@ -390,9 +412,11 @@ static void build_button(Widget &wg, JsonObjectConst j) {
     lv_obj_t *lbl = lv_label_create(wg.root);
     lv_obj_add_style(lbl, &s_value, LV_PART_MAIN);
     bool icon_only = wg.icon && !wg.title[0];
-    lv_obj_set_style_text_font(lbl, icon_only && h >= 44 ? &ui_font_24 : &ui_font_16, LV_PART_MAIN);
+    const lv_font_t *bf = font_for(wg, icon_only && h >= 44 ? &ui_font_24 : &ui_font_16);
+    lv_obj_set_style_text_font(lbl, bf, LV_PART_MAIN);
     lv_label_set_long_mode(lbl, LV_LABEL_LONG_DOT);
     lv_obj_set_width(lbl, w - 16 > 8 ? w - 16 : 8);
+    if (wg.font > 0) clip_line(lbl, w - 16, bf);
     lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
     char buf[64];
     compose_text(wg, buf, sizeof(buf), wg.entity_id);
@@ -439,7 +463,12 @@ static void build_gauge(Widget &wg, JsonObjectConst j, bool interactive) {
 static void build_switch(Widget &wg, JsonObjectConst j) {
     int x = j["x"] | 0, y = j["y"] | 0, w = j["w"] | 160, h = j["h"] | 60;
     wg.root = make_card(x, y, w, h);
-    make_title(wg, LV_ALIGN_LEFT_MID);
+    lv_obj_t *st = make_title(wg, LV_ALIGN_LEFT_MID);
+    if (wg.font > 0) {
+        lv_obj_set_style_text_font(st, font_for(wg, &ui_font_12), LV_PART_MAIN);
+        clip_line(st, w - 16 - 56, font_for(wg, &ui_font_12));     // leave room for the switch itself
+        lv_obj_align(st, LV_ALIGN_LEFT_MID, 0, 0);
+    }
 
     wg.ctl = lv_switch_create(wg.root);
     style_track(wg, wg.ctl);
@@ -456,7 +485,7 @@ static void build_checkbox(Widget &wg, JsonObjectConst j) {
     char buf[64];
     compose_text(wg, buf, sizeof(buf), wg.entity_id);
     lv_checkbox_set_text(wg.ctl, buf);              // copied by LVGL
-    lv_obj_set_style_text_font(wg.ctl, &ui_font_16, LV_PART_MAIN);
+    lv_obj_set_style_text_font(wg.ctl, font_for(wg, &ui_font_16), LV_PART_MAIN);
     lv_obj_set_style_text_color(wg.ctl, col_fg(wg, C_WHITE), LV_PART_MAIN);
     lv_obj_set_style_bg_color(wg.ctl, col_bg(wg, C_OFF), LV_PART_INDICATOR);
     lv_obj_set_style_bg_color(wg.ctl, col_on(wg), (lv_style_selector_t)(LV_PART_INDICATOR | LV_STATE_CHECKED));
@@ -544,6 +573,13 @@ static void build_led(Widget &wg, JsonObjectConst j) {
 }
 
 static const lv_font_t *clock_font(const Widget &wg, int w, int h) {
+    if (wg.font > 0) {                          // fixed size: the largest clock/UI font that is <= the request
+        static const struct { int size; const lv_font_t *font; } F[] = {
+            {48, &ui_clock_48}, {32, &ui_clock_32}, {24, &ui_font_24}, {20, &ui_font_20}, {16, &ui_font_16}, {14, &ui_font_14}};
+        for (const auto &f : F)
+            if (wg.font >= f.size) return f.font;
+        return &ui_font_12;
+    }
     int chars = wg.format == CF_TIME ? 5 : wg.format == CF_TIME_S ? 8 : wg.format == CF_DATE ? 10 : 12;
     struct Cand { const lv_font_t *font; int size; };
     static const Cand C[] = {{&ui_clock_48, 48}, {&ui_clock_32, 32}, {&ui_font_24, 24}, {&ui_font_20, 20}, {&ui_font_16, 16}};
@@ -576,14 +612,14 @@ static void build_select(Widget &wg, JsonObjectConst j, bool roller) {
     if (roller) lv_obj_set_height(wg.ctl, h);
     lv_obj_set_style_bg_color(wg.ctl, col_bg(wg, C_OFF), LV_PART_MAIN);
     lv_obj_set_style_text_color(wg.ctl, col_fg(wg, C_WHITE), LV_PART_MAIN);
-    lv_obj_set_style_text_font(wg.ctl, &ui_font_16, LV_PART_MAIN);
+    lv_obj_set_style_text_font(wg.ctl, font_for(wg, &ui_font_16), LV_PART_MAIN);
     lv_obj_set_style_border_width(wg.ctl, 0, LV_PART_MAIN);
     lv_obj_set_style_radius(wg.ctl, 10, LV_PART_MAIN);
     if (roller) {
         lv_roller_set_options(wg.ctl, "--", LV_ROLLER_MODE_NORMAL);
         lv_obj_set_style_bg_color(wg.ctl, col_on(wg), LV_PART_SELECTED);
         lv_obj_set_style_text_color(wg.ctl, C_BG, LV_PART_SELECTED);
-        lv_obj_set_style_text_font(wg.ctl, &ui_font_16, LV_PART_SELECTED);
+        lv_obj_set_style_text_font(wg.ctl, font_for(wg, &ui_font_16), LV_PART_SELECTED);
     } else {
         lv_dropdown_set_options(wg.ctl, "--");
         lv_obj_add_event_cb(wg.ctl, cb_dropdown_open, LV_EVENT_READY, &wg);
@@ -622,10 +658,12 @@ static void build_media(Widget &wg, JsonObjectConst j) {
     int ch = h - 16;
 
     wg.title_lbl = lv_label_create(wg.root);
-    lv_obj_set_style_text_font(wg.title_lbl, &ui_font_16, LV_PART_MAIN);
+    const lv_font_t *mf = font_for(wg, &ui_font_16);
+    lv_obj_set_style_text_font(wg.title_lbl, mf, LV_PART_MAIN);
     lv_obj_set_style_text_color(wg.title_lbl, col_fg(wg, C_WHITE), LV_PART_MAIN);
     lv_label_set_long_mode(wg.title_lbl, LV_LABEL_LONG_DOT);
     lv_obj_set_width(wg.title_lbl, inner);
+    if (wg.font > 0) clip_line(wg.title_lbl, inner, mf);
     lv_label_set_text(wg.title_lbl, wg.title[0] ? wg.title : "--");
     lv_obj_align(wg.title_lbl, LV_ALIGN_TOP_LEFT, 0, 0);
 
@@ -685,7 +723,13 @@ static void build_thermostat(Widget &wg, JsonObjectConst j) {
     wg.aux1 = make_zone(wg, wg.root, bs, bs, LV_ALIGN_LEFT_MID, 0, 4, LV_SYMBOL_MINUS, &ui_font_20);
     wg.aux2 = make_zone(wg, wg.root, bs, bs, LV_ALIGN_RIGHT_MID, 0, 4, LV_SYMBOL_PLUS, &ui_font_20);
 
-    make_value(wg, LV_ALIGN_CENTER, 0, 4, h >= 80 ? &ui_font_24 : &ui_font_20);
+    const lv_font_t *tf = font_for(wg, h >= 80 ? &ui_font_24 : &ui_font_20);
+    make_value(wg, LV_ALIGN_CENTER, 0, 4, tf);
+    if (wg.font > 0) {                                   // keep it between the two buttons
+        clip_line(wg.value_lbl, w - 2 * (bs + 8) - 8, tf);
+        lv_obj_set_style_text_align(wg.value_lbl, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+        lv_obj_align(wg.value_lbl, LV_ALIGN_CENTER, 0, 4);
+    }
 
     wg.aux_lbl2 = lv_label_create(wg.root);              // mode text, bottom centre
     lv_obj_set_style_text_font(wg.aux_lbl2, &ui_font_12, LV_PART_MAIN);
@@ -911,6 +955,8 @@ static void parse_widget(Widget &wg, JsonObjectConst j) {
     wg.crit    = j["crit"] | 0.0f;
     wg.invert  = j["invert"] | false;
     wg.icon    = icon_symbol(j["icon"] | "");
+    int fnt    = j["font"] | 0;
+    wg.font    = fnt > 0 ? fnt : 0;               // unknown or negative: automatic
     const char *fmt = j["format"] | "time";
     wg.format  = strcmp(fmt, "time_s") == 0 ? CF_TIME_S : strcmp(fmt, "date") == 0 ? CF_DATE
                : strcmp(fmt, "datetime") == 0 ? CF_DATETIME : CF_TIME;

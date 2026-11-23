@@ -56,7 +56,7 @@ def _short(state: str) -> str:
 # Wire format: a widget only carries the fields that differ from these defaults.
 DEFAULTS = {
     "entity": "", "label": "", "unit": "", "bg": "", "fg": "", "on": "", "attr": "", "icon": "", "action": "",
-    "format": "time", "warn": None, "crit": None, "invert": False,
+    "format": "time", "font": 0, "warn": None, "crit": None, "invert": False,
 }
 TIME_EVERY = timedelta(minutes=5)
 VALUE_GAP = 0.05              # seconds between slider values (the last one must always get through)

@@ -17,6 +17,7 @@ from .const import (
     ACTION_DOMAINS,
     BUTTON_ACTIONS,
     CLOCK_FORMATS,
+    FONT_SIZES,
     ICONS,
     MIN_SIZE,
     SELECT_DOMAINS,
@@ -100,6 +101,7 @@ WIDGET_SCHEMA = vol.Schema(
         vol.Optional("bg", default=""): _COLOR,
         vol.Optional("fg", default=""): _COLOR,
         vol.Optional("on", default=""): _COLOR,
+        vol.Optional("font", default=0): vol.In(FONT_SIZES),
         vol.Optional("attr", default=""): _ATTR,
         vol.Optional("icon", default=""): vol.In(("",) + ICONS),
         vol.Optional("action", default=""): vol.In(("",) + tuple(sorted({a for v in BUTTON_ACTIONS.values() for a in v}))),
@@ -152,6 +154,8 @@ def _widget_problem(widget: dict) -> str | None:
         return f"a {kind} needs an entity"
     if kind in ("clock", "panel") and entity:
         return f"a {kind} has no entity"
+    if widget["font"] > 24 and kind != "clock":
+        return "font sizes above 24 are only for a clock"
     action = widget["action"]
     if kind == "button":
         allowed = BUTTON_ACTIONS.get(domain, ())

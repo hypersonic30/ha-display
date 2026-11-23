@@ -301,3 +301,29 @@ async def test_a_slider_cannot_be_tapped_and_a_label_cannot_be_set(hass, make_en
     await asyncio.sleep(0.1)
     assert not on and not tog
     await ws.close()
+
+
+# ── font size ────────────────────────────────────────────────────────────────
+
+def test_font_size_accepts_only_the_available_sizes():
+    assert validate_widgets([w("label", "sensor.x")])[0]["font"] == 0
+    for size in (12, 14, 16, 20, 24):
+        assert validate_widgets([w("button", "light.a", font=size)])[0]["font"] == size
+    for bad in (-1, 10, 13, 100, "big", 16.5, True):
+        with pytest.raises(vol.Invalid):
+            validate_widgets([w("label", "sensor.x", font=bad)])
+
+
+def test_the_two_big_digit_fonts_are_for_clocks_only():
+    assert validate_widgets([w("clock", font=48)])[0]["font"] == 48
+    assert validate_widgets([w("clock", font=32)])[0]["font"] == 32
+    for kind, entity in (("label", "sensor.x"), ("button", "light.a"), ("media", "media_player.m"), ("thermostat", "climate.c")):
+        with pytest.raises(vol.Invalid):
+            validate_widgets([w(kind, entity, font=32)])
+
+
+async def test_font_goes_to_the_panel_only_when_set(hass, make_entry, hass_client_no_auth):
+    ws, (layout, _) = await session(hass, make_entry, hass_client_no_auth, [w("label", "sensor.x", font=24), w("label", "sensor.x", id="w2")])
+    first, second = layout["widgets"]
+    assert first["font"] == 24 and "font" not in second
+    await ws.close()
