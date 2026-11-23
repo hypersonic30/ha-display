@@ -15,6 +15,13 @@ from homeassistant.helpers.storage import Store
 
 from .const import (
     ACTION_DOMAINS,
+    BUTTON_ACTIONS,
+    CLOCK_FORMATS,
+    ICONS,
+    MIN_SIZE,
+    SELECT_DOMAINS,
+    SLIDER_DOMAINS,
+    TOGGLE_DOMAINS,
     DOMAIN,
     MAX_PAGES,
     MAX_WIDGETS,
@@ -74,6 +81,9 @@ def _entity(value: Any) -> str:
     return value
 
 
+_COLOR = vol.All(str, vol.Any("", vol.Match(r"^#[0-9a-fA-F]{6}$")), lambda v: v.lower())
+_ATTR = vol.All(str, vol.Any("", vol.Match(r"^[a-z0-9_]{1,23}$")))
+_THRESHOLD = vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=-1_000_000, max=1_000_000)))
 _NUM = vol.All(vol.Coerce(int), vol.Range(min=-1_000_000, max=1_000_000))
 _X = vol.All(vol.Coerce(int), vol.Range(min=0, max=max(SCREEN_W, SCREEN_H) - 1))
 _SIZE = vol.All(vol.Coerce(int), vol.Range(min=1, max=max(SCREEN_W, SCREEN_H)))
@@ -87,6 +97,16 @@ WIDGET_SCHEMA = vol.Schema(
         vol.Optional("unit", default=""): _text(15),
         vol.Optional("min", default=0): _NUM,
         vol.Optional("max", default=100): _NUM,
+        vol.Optional("bg", default=""): _COLOR,
+        vol.Optional("fg", default=""): _COLOR,
+        vol.Optional("on", default=""): _COLOR,
+        vol.Optional("attr", default=""): _ATTR,
+        vol.Optional("icon", default=""): vol.In(("",) + ICONS),
+        vol.Optional("action", default=""): vol.In(("",) + tuple(sorted({a for v in BUTTON_ACTIONS.values() for a in v}))),
+        vol.Optional("format", default="time"): vol.In(CLOCK_FORMATS),
+        vol.Optional("warn", default=None): _THRESHOLD,
+        vol.Optional("crit", default=None): _THRESHOLD,
+        vol.Optional("invert", default=False): bool,
         vol.Required("x"): _X,
         vol.Required("y"): _X,
         vol.Required("w"): vol.All(_SIZE, vol.Range(min=20)),
@@ -111,6 +131,39 @@ def _inside(item: dict, screen: tuple[int, int]) -> bool:
     return item["x"] + item["w"] <= screen[0] and item["y"] + item["h"] <= screen[1]
 
 
+def _widget_problem(widget: dict) -> str | None:
+    """Why this widget cannot work as configured (entity domain vs. type/action), or None."""
+    kind = widget["type"]
+    entity = widget["entity"]
+    domain = entity.split(".")[0] if entity else ""
+    min_w, min_h = MIN_SIZE.get(kind, (20, 20))
+    if widget["w"] < min_w or widget["h"] < min_h:
+        return f"a {kind} needs at least {min_w}x{min_h} pixels"
+    if kind in ("gauge", "bar", "slider", "arc") and widget["max"] <= widget["min"]:
+        return "max must be greater than min"
+    needs = {
+        "button": ACTION_DOMAINS, "switch": TOGGLE_DOMAINS, "checkbox": TOGGLE_DOMAINS, "slider": SLIDER_DOMAINS,
+        "arc": SLIDER_DOMAINS, "dropdown": SELECT_DOMAINS, "roller": SELECT_DOMAINS, "media": {"media_player"},
+        "thermostat": {"climate"},
+    }.get(kind)
+    if needs is not None and entity and domain not in needs:
+        return f"a {kind} cannot work with {domain} entities"
+    if needs is not None and kind in ("media", "thermostat", "slider", "arc", "dropdown", "roller") and not entity:
+        return f"a {kind} needs an entity"
+    if kind in ("clock", "panel") and entity:
+        return f"a {kind} has no entity"
+    action = widget["action"]
+    if kind == "button":
+        allowed = BUTTON_ACTIONS.get(domain, ())
+        if action and action not in allowed:
+            return f"{domain or 'this entity'} has no action '{action}'"
+        if domain == "climate" and not action:
+            return "a climate button needs an action (temp_up or temp_down)"
+    elif action:
+        return "only buttons have an action"
+    return None
+
+
 def validate_widgets(widgets: Any, screen: tuple[int, int] = (SCREEN_W, SCREEN_H)) -> list[dict]:
     """The cleaned widget list of one page, or vol.Invalid with a readable message."""
     if not isinstance(widgets, list):
@@ -129,10 +182,9 @@ def validate_widgets(widgets: Any, screen: tuple[int, int] = (SCREEN_W, SCREEN_H
         seen.add(widget["id"])
         if not _inside(widget, screen):
             raise vol.Invalid(f"widget {index}: outside the {screen[0]}x{screen[1]} screen")
-        if widget["type"] in ("button", "switch") and widget["entity"] and widget["entity"].split(".")[0] not in ACTION_DOMAINS:
-            raise vol.Invalid(f"widget {index}: a {widget['type']} cannot operate {widget['entity'].split('.')[0]} entities")
-        if widget["type"] in ("gauge", "bar") and widget["max"] <= widget["min"]:
-            raise vol.Invalid(f"widget {index}: max must be greater than min")
+        problem = _widget_problem(widget)
+        if problem:
+            raise vol.Invalid(f"widget {index}: {problem}")
         clean.append(widget)
     return clean
 
@@ -163,7 +215,11 @@ def validate_layout(pages: Any, pager: Any, screen: tuple[int, int]) -> tuple[li
             widgets = validate_widgets(page.get("widgets", []), screen)
         except vol.Invalid as err:
             raise vol.Invalid(f"page '{name}', {err}") from err
-        clean_pages.append({"id": page_id, "name": name, "widgets": widgets})
+        try:
+            bg = _COLOR(page.get("bg", ""))
+        except vol.Invalid as err:
+            raise vol.Invalid(f"page {number}: background {err}") from err
+        clean_pages.append({"id": page_id, "name": name, "bg": bg, "widgets": widgets})
 
     clean_pager = None
     if pager is not None:

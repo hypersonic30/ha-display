@@ -9,6 +9,7 @@
 static WebSocketsClient ws;
 static state_cb_t  _on_state  = nullptr;
 static layout_cb_t _on_layout = nullptr;
+static frame_cb_t  _on_frame  = nullptr;
 static Config      _cfg;
 
 static bool     _connected   = false;
@@ -108,6 +109,9 @@ static void handle_message(const char *payload, size_t length) {
             const char *s = kv.value().as<const char *>();
             if (s) _on_state(kv.key().c_str(), s);
         }
+
+    } else if (strcmp(type, "options") == 0 || strcmp(type, "time") == 0) {
+        if (_on_frame) _on_frame(type, doc.as<JsonObjectConst>());
 
     } else if (strcmp(type, "ota") == 0) {
         // Only noted here; the blocking download runs from loop() (see ota.cpp).
@@ -234,4 +238,36 @@ void ha_client_page(int dir) {
     doc["dir"]  = dir > 0 ? "next" : "prev";
     ws_send(doc);
     Serial.printf("[HA] page %s\n", dir > 0 ? "next" : "prev");
+}
+
+void ha_client_on_frame(frame_cb_t cb) { _on_frame = cb; }
+
+void ha_client_set_value(const char *widget_id, float value) {
+    if (!_connected || !_have_layout || !widget_id || !widget_id[0]) return;
+    JsonDocument doc;
+    doc["type"]   = "set";
+    doc["widget"] = widget_id;
+    doc["value"]  = value;
+    ws_send(doc);
+    Serial.printf("[HA] set %s value %.2f\n", widget_id, value);
+}
+
+void ha_client_set_option(const char *widget_id, const char *option) {
+    if (!_connected || !_have_layout || !widget_id || !widget_id[0] || !option) return;
+    JsonDocument doc;
+    doc["type"]   = "set";
+    doc["widget"] = widget_id;
+    doc["option"] = option;
+    ws_send(doc);
+    Serial.printf("[HA] set %s option %s\n", widget_id, option);
+}
+
+void ha_client_act(const char *widget_id, const char *action) {
+    if (!_connected || !_have_layout || !widget_id || !widget_id[0] || !action) return;
+    JsonDocument doc;
+    doc["type"]   = "act";
+    doc["widget"] = widget_id;
+    doc["action"] = action;
+    ws_send(doc);
+    Serial.printf("[HA] act %s %s\n", widget_id, action);
 }

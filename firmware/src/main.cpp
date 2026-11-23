@@ -236,6 +236,12 @@ static void on_entity_state(const char *entity_id, const char *state_val) {
     widgets_update(entity_id, state_val);
 }
 
+static void on_frame(const char *type, JsonObjectConst ev) {
+    if (ota_running()) return;
+    if (strcmp(type, "options") == 0)   widgets_options(ev);
+    else if (strcmp(type, "time") == 0) widgets_time(ev);
+}
+
 static void on_layout(JsonObjectConst ev) {
     if (ota_running()) return;   // the update screen stays until the download is over
     int brightness = ev["settings"]["brightness"] | 0;
@@ -261,6 +267,7 @@ static void enter_running() {
     built_rev = -1; built_page = -1;
     last_ha_status = HA_CONNECTING;
     ui_show_running(cfg.ha_url);
+    ha_client_on_frame(on_frame);
     ha_client_begin(cfg, on_entity_state, on_layout);
     Serial.println("[STATE] -> RUNNING");
 }
@@ -390,6 +397,7 @@ void loop() {
     case RUNNING:
         if (ota_pending()) { run_ota(); break; }
         ha_client_tick();
+        widgets_tick();
         check_ha_status();
         break;
     }

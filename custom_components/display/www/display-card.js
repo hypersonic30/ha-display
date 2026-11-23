@@ -1,17 +1,61 @@
 // ESP32 Display card: visual layout editor for the panels set up in the "ESP32 Display" integration.
 // Talks to Home Assistant only through the integration's WebSocket commands (display/...).
 
-const CARD_VERSION = "0.3.0";
+const CARD_VERSION = "0.4.0";
 const GRID = 5, MAX_WIDGETS = 32, MAX_PAGES = 8, MIN_SIZE = 20, PAGER_MIN_W = 60, PAGER_MIN_H = 24;
 const PAGER_ID = "__pager";
 
+const ACT = ["light", "switch", "input_boolean", "automation", "script", "scene", "button", "input_button", "fan", "cover", "media_player", "climate", "vacuum"];
+const TOGGLE = ["light", "switch", "input_boolean", "fan", "automation", "cover", "media_player"];
+const SLIDE = ["light", "cover", "fan", "media_player", "input_number", "number"];
+const SELECT = ["select", "input_select", "media_player"];
 const TYPES = {
-  label:  { icon: "Aa", name: "Wert",     w: 180, h: 70,  domains: null },
-  button: { icon: "▣",  name: "Taster",   w: 130, h: 80,  domains: ["light", "switch", "input_boolean", "automation", "script", "scene", "button", "input_button", "fan", "cover"] },
-  gauge:  { icon: "◔",  name: "Anzeige",  w: 150, h: 150, domains: ["sensor", "input_number", "number"] },
-  switch: { icon: "⇆",  name: "Schalter", w: 170, h: 60,  domains: ["light", "switch", "input_boolean", "fan", "automation"] },
-  bar:    { icon: "▬",  name: "Balken",   w: 210, h: 60,  domains: ["sensor", "input_number", "number"] },
-  pager:  { icon: "‹ ›", name: "Seitenwechsel", w: 220, h: 40, domains: null },
+  label:      { icon: "Aa",  name: "Wert",        w: 180, h: 70,  domains: null },
+  button:     { icon: "▣",   name: "Taster",      w: 130, h: 80,  domains: ACT },
+  switch:     { icon: "⇆",   name: "Schalter",    w: 170, h: 60,  domains: TOGGLE },
+  checkbox:   { icon: "☑",   name: "Kästchen",    w: 180, h: 44,  domains: TOGGLE },
+  slider:     { icon: "◐",   name: "Schieber",    w: 220, h: 60,  domains: SLIDE },
+  arc:        { icon: "◠",   name: "Drehregler",  w: 140, h: 140, min: [60, 60], domains: SLIDE },
+  gauge:      { icon: "◔",   name: "Anzeige",     w: 150, h: 150, domains: ["sensor", "input_number", "number"] },
+  bar:        { icon: "▬",   name: "Balken",      w: 210, h: 60,  domains: ["sensor", "input_number", "number"] },
+  led:        { icon: "●",   name: "LED",         w: 60,  h: 60,  domains: null },
+  dropdown:   { icon: "▾",   name: "Auswahl",     w: 200, h: 50,  domains: SELECT },
+  roller:     { icon: "☰",   name: "Rad",         w: 160, h: 110, domains: SELECT },
+  clock:      { icon: "◷",   name: "Uhr",         w: 160, h: 70,  domains: [] },
+  panel:      { icon: "▭",   name: "Fläche",      w: 200, h: 120, domains: [] },
+  media:      { icon: "♫",   name: "Medien",      w: 300, h: 120, min: [200, 100], domains: ["media_player"] },
+  thermostat: { icon: "☼",   name: "Thermostat",  w: 200, h: 110, min: [140, 90], domains: ["climate"] },
+  pager:      { icon: "‹ ›", name: "Seitenwechsel", w: 220, h: 40, domains: null },
+};
+const minSize = (type) => TYPES[type]?.min || [MIN_SIZE, MIN_SIZE];
+const ACTIVE = new Set(["on", "open", "opening", "closing", "playing", "home", "unlocked", "heat", "cool", "heat_cool", "auto", "active", "detected", "armed_home", "armed_away", "cleaning"]);
+const COL = { off: "#2a2a44", on: "#4fc3f7", card: "#1a1a2e", text: "#e0e0e0", muted: "#777799" };
+const ACTIONS = {
+  media_player: [["play_pause", "Wiedergabe / Pause"], ["play", "Wiedergabe"], ["pause", "Pause"], ["stop", "Stopp"], ["next", "Nächster Titel"], ["prev", "Vorheriger Titel"], ["volume_up", "Lauter"], ["volume_down", "Leiser"], ["mute", "Stumm schalten"]],
+  cover: [["toggle", "Umschalten"], ["open", "Öffnen"], ["close", "Schließen"], ["stop", "Stopp"]],
+  climate: [["temp_up", "Wärmer"], ["temp_down", "Kälter"]],
+  vacuum: [["start", "Start"], ["pause", "Pause"], ["return_home", "Zur Station"]],
+};
+const ACTION_ICON = { play_pause: "play", play: "play", pause: "pause", stop: "stop", next: "next", prev: "prev", volume_up: "volume", volume_down: "volume", mute: "mute", temp_up: "plus", temp_down: "minus", open: "up", close: "down", start: "play", return_home: "home" };
+const ICONS = {
+  power: ["⏻", "Ein/Aus"], home: ["⌂", "Haus"], bell: ["🔔", "Glocke"], play: ["▶", "Play"], pause: ["⏸", "Pause"], stop: ["⏹", "Stopp"],
+  next: ["⏭", "Weiter"], prev: ["⏮", "Zurück"], plus: ["+", "Plus"], minus: ["−", "Minus"], up: ["▲", "Hoch"], down: ["▼", "Runter"],
+  left: ["◀", "Links"], right: ["▶", "Rechts"], ok: ["✓", "Haken"], close: ["✕", "Kreuz"], settings: ["⚙", "Zahnrad"], refresh: ["↻", "Aktualisieren"],
+  wifi: ["📶", "WLAN"], battery: ["🔋", "Batterie"], charge: ["⚡", "Laden"], warning: ["⚠", "Warnung"], eye: ["👁", "Auge"], volume: ["🔊", "Lautstärke"],
+  mute: ["🔇", "Stumm"], audio: ["♪", "Musik"], video: ["🎬", "Video"], list: ["☰", "Liste"], trash: ["🗑", "Papierkorb"], edit: ["✎", "Stift"],
+  gps: ["⌖", "Ort"], image: ["🖼", "Bild"], shuffle: ["🔀", "Zufall"], loop: ["🔁", "Wiederholen"], bluetooth: ["ᛒ", "Bluetooth"], usb: ["⭥", "USB"],
+};
+const FORMATS = [["time", "Uhrzeit 14:05"], ["time_s", "Uhrzeit mit Sekunden"], ["date", "Datum 24.11.2026"], ["datetime", "Datum und Uhrzeit"]];
+const NO_ENTITY = (type) => TYPES[type]?.domains?.length === 0;
+const levelColor = (w, n, base) => {
+  if (!Number.isFinite(n)) return base;
+  const hit = (t) => t !== null && t !== undefined && t !== "" && (w.invert ? n <= Number(t) : n >= Number(t));
+  return hit(w.crit) ? "#ef5350" : hit(w.warn) ? "#ffa726" : base;
+};
+const clockText = (format) => {
+  const d = new Date(), p = (x) => String(x).padStart(2, "0"), t = `${p(d.getHours())}:${p(d.getMinutes())}`;
+  return format === "time_s" ? `${t}:${p(d.getSeconds())}` : format === "date" ? `${p(d.getDate())}.${p(d.getMonth() + 1)}.${d.getFullYear()}`
+    : format === "datetime" ? `${p(d.getDate())}.${p(d.getMonth() + 1)}. ${t}` : t;
 };
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -67,6 +111,24 @@ const STYLE = `
 .w.pager .ar { flex: none; text-align: center; font-size: 24px; color: #4fc3f7; pointer-events: none; }
 .w.pager .pl { flex: 1; min-width: 0; text-align: center; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
 .w.pager.idle:not(.sel) { opacity: .55; border: 2px dashed #4fc3f788; }
+.w.led { background: transparent; padding: 0; display: flex; align-items: center; justify-content: center; }
+.led i { display: block; border-radius: 50%; }
+.w.panel { padding: 6px 8px; }
+.w.clock { display: flex; align-items: center; justify-content: center; font-size: 30px; }
+.strack { position: absolute; left: 14px; right: 14px; bottom: 12px; height: 8px; border-radius: 4px; pointer-events: none; }
+.strack i { display: block; height: 100%; border-radius: 4px; } .strack b { position: absolute; top: -6px; width: 20px; height: 20px; margin-left: -10px; border-radius: 50%; background: #fff; }
+.box { position: absolute; left: 8px; right: 8px; bottom: 6px; top: 24px; border-radius: 8px; display: flex; align-items: center; padding: 0 10px; pointer-events: none; font-size: 15px; justify-content: space-between; gap: 6px; }
+.box span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chk { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); width: 24px; height: 24px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 16px; color: #0f0f1a; pointer-events: none; }
+.w.checkbox .t { position: absolute; left: 40px; top: 50%; transform: translateY(-50%); right: 8px; font-size: 14px; color: inherit; }
+.w.media .t, .w.thermostat .t { font-size: 15px; color: inherit; }
+.w.media .a { font-size: 12px; color: #777799; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+.ctl { position: absolute; left: 8px; right: 8px; display: flex; justify-content: space-around; font-size: 22px; pointer-events: none; }
+.thermo { position: absolute; inset: 24px 8px 6px; display: flex; align-items: center; justify-content: space-between; pointer-events: none; }
+.thermo big { font-size: 30px; } .thermo em { font-style: normal; font-size: 28px; padding: 0 10px; border-radius: 8px; background: #ffffff18; }
+.color { display: flex; gap: 6px; align-items: center; } .color input[type=color] { width: 44px; height: 30px; padding: 0; border: 1px solid var(--divider-color); border-radius: 6px; background: none; flex: none; }
+.color input.unset { opacity: .45; } .mini { border: 0; background: none; color: var(--secondary-text-color); font-size: 12px; cursor: pointer; text-decoration: underline; padding: 2px; } .mini:disabled { opacity: .35; cursor: default; text-decoration: none; }
+.check { display: flex; gap: 6px; align-items: center; font-size: 13px; margin-bottom: 9px; }
 .pagebar { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 14px; border-bottom: 1px solid var(--divider-color); align-items: center; }
 .chip { border: 1px solid var(--divider-color); background: var(--secondary-background-color); color: var(--primary-text-color); border-radius: 16px; padding: 5px 14px; font-size: 13px; cursor: pointer; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chip.on { background: var(--primary-color); color: var(--text-primary-color, #fff); border-color: transparent; }
@@ -224,7 +286,7 @@ class DisplayCard extends HTMLElement {
   }
 
   _applyLayout(layout) {
-    this._pages = layout.pages.map((p) => ({ id: p.id, name: p.name, widgets: p.widgets.map((w) => ({ ...w })) }));
+    this._pages = layout.pages.map((p) => ({ id: p.id, name: p.name, bg: p.bg || "", widgets: p.widgets.map((w) => ({ ...w })) }));
     this._pager = layout.pager ? { ...layout.pager, id: PAGER_ID, type: "pager" } : null;
     this._page = Math.min(this._page, this._pages.length - 1);
     this._screen = layout.screen;
@@ -367,7 +429,10 @@ class DisplayCard extends HTMLElement {
     if (type === "pager") return this._addPager(x, y, click);
     if (this._widgets.length >= MAX_WIDGETS) return this._message(`Mehr als ${MAX_WIDGETS} Elemente passen nicht auf eine Seite.`, true);
     const d = TYPES[type];
-    const w = { id: this._nextId(), type, entity: "", label: "", unit: type === "bar" ? "%" : "", min: 0, max: 100, w: d.w, h: d.h, x: 0, y: 0 };
+    const w = {
+      id: this._nextId(), type, entity: "", label: "", unit: type === "bar" ? "%" : "", min: 0, max: 100, w: d.w, h: d.h, x: 0, y: 0,
+      bg: "", fg: "", on: "", attr: "", icon: "", action: "", format: "time", warn: null, crit: null, invert: false,
+    };
     w.x = clamp(snap(x), 0, this._W - w.w);
     w.y = clamp(snap(y), 0, this._H - w.h);
     this._widgets.push(w);
@@ -422,6 +487,7 @@ class DisplayCard extends HTMLElement {
     this._pages.splice(this._page + 1, 0, {
       id: this._nextPageId(),
       name: cutBytes(copy ? `${from.name} 2` : `Seite ${this._pages.length + 1}`, 31),
+      bg: copy ? from.bg || "" : "",
       widgets: copy ? from.widgets.map((w) => ({ ...w })) : [],
     });
     this._setDirty(true);
@@ -492,6 +558,7 @@ class DisplayCard extends HTMLElement {
     const canvas = this.shadowRoot.getElementById("canvas");
     if (!canvas) return;
     canvas.innerHTML = "";
+    this.shadowRoot.getElementById("screen").style.background = this._pages[this._page].bg || "";
     for (const w of this._items()) {
       const el = document.createElement("div");
       el.dataset.id = w.id;
@@ -521,39 +588,109 @@ class DisplayCard extends HTMLElement {
       + (w.id === this._selected ? '<div class="rz"></div>' : "");
   }
 
+  // The text a widget shows: the state, or an attribute of the entity.
+  _text(w) {
+    const st = this._hass?.states?.[w.entity];
+    if (!st) return undefined;
+    if (!w.attr) return st.state;
+    const v = st.attributes?.[w.attr];
+    return v === undefined || v === null ? "" : Array.isArray(v) ? v.join(", ") : String(v);
+  }
+
+  // Slider/arc value in the widget's scale (same rules as the integration).
+  _level(w) {
+    const st = this._hass?.states?.[w.entity];
+    if (!st) return NaN;
+    const a = st.attributes || {}, d = w.entity.split(".")[0];
+    if (d === "light") return st.state === "on" && a.brightness != null ? Math.round((a.brightness * 100) / 255) : 0;
+    if (d === "cover") return Number(a.current_position) || 0;
+    if (d === "fan") return Number(a.percentage) || 0;
+    if (d === "media_player") return typeof a.volume_level === "number" ? Math.round(a.volume_level * 100) : 0;
+    return parseFloat(st.state);
+  }
+
   _paint(el, w) {
     if (w.type === "pager") return this._paintPager(el, w);
     el.className = `w ${w.type}${w.id === this._selected ? " sel" : ""}`;
+    el.style.background = "";
+    el.style.color = "";
     this._place(w);
+    const st = this._hass?.states?.[w.entity];
+    const attrs = st?.attributes || {};
+    const state = st?.state;
+    const active = ACTIVE.has(String(state).toLowerCase());
+    const off = w.bg || COL.off, onc = w.on || COL.on;
+    if (w.fg) el.style.color = w.fg;
+    const ic = w.icon && ICONS[w.icon] ? ICONS[w.icon][0] : "";
     const title = esc(w.label || w.entity || TYPES[w.type].name);
-    const state = this._state(w);
-    const n = parseFloat(state);
+    const shown = this._text(w);
+    const n = parseFloat(w.type === "slider" || w.type === "arc" ? this._level(w) : shown);
     const isNum = Number.isFinite(n);
     const unit = esc(w.unit);
     const range = w.max > w.min ? w.max - w.min : 100;
     const pct = isNum ? clamp(((n - w.min) / range) * 100, 0, 100) : 0;
-    const on = state === "on";
+    const fill = levelColor(w, n, onc);
     let inner;
     switch (w.type) {
+      case "label":
+        if (w.bg) el.style.background = w.bg;
+        inner = `<div class="t">${ic ? ic + " " : ""}${title}</div><div class="v">${shown === undefined ? "--" : esc(shown) + (unit ? " " + unit : "")}</div>`; break;
       case "button":
-        el.classList.toggle("on", on);
-        inner = `<div class="v">${title}</div>`; break;
-      case "gauge": {
+        el.style.background = active ? onc : off;
+        if (active && !w.fg) el.style.color = "#0f0f1a";
+        inner = `<div class="v">${ic ? `<span style="font-size:${w.label ? 18 : 28}px;margin-right:${w.label ? 6 : 0}px">${ic}</span>` : ""}${ic && !w.label ? "" : title}</div>`; break;
+      case "gauge": case "arc": {
         const size = Math.max(10, Math.min(w.w, w.h) - 34);
-        inner = `<div class="t">${title}</div><div class="ring" style="width:${size}px;height:${size}px;background:conic-gradient(from 225deg,#4fc3f7 ${pct * 2.7}deg,#2a2a44 0 270deg,transparent 0)"></div><div class="v">${isNum ? n.toFixed(1) + unit : "--"}</div>`; break;
+        const text = w.type === "arc" ? (isNum ? Math.round(n) + unit : "--") : (isNum ? n.toFixed(1) + unit : "--");
+        inner = `<div class="t" style="text-align:center">${title}</div><div class="ring" style="width:${size}px;height:${size}px;background:conic-gradient(from 225deg,${fill} ${pct * 2.7}deg,${off} 0 270deg,transparent 0)"></div><div class="v" style="text-align:center;bottom:auto;top:50%;transform:translateY(-40%)">${text}</div>`; break;
       }
       case "switch":
-        inner = `<div class="t">${title}</div><div class="pill${on ? " on" : ""}"></div>`; break;
+        inner = `<div class="t">${title}</div><div class="pill${active ? " on" : ""}" style="background:${active ? onc : off}"></div>`; break;
+      case "checkbox":
+        inner = `<div class="chk" style="background:${active ? onc : off}">${active ? "✓" : ""}</div><div class="t">${title}</div>`; break;
+      case "led": {
+        const d = Math.max(8, Math.min(w.w, w.h) - 6);
+        inner = `<i style="width:${d}px;height:${d}px;background:${active ? onc : off};box-shadow:${active ? `0 0 ${d / 3}px ${onc}` : "none"}"></i>`; break;
+      }
       case "bar":
-        inner = `<div class="t">${title}</div><div class="v">${isNum ? Math.round(n) + unit : "--"}</div><div class="track"><i style="width:${pct}%"></i></div>`; break;
+        inner = `<div class="t">${title}</div><div class="v" style="top:6px;bottom:auto;left:auto;font-size:14px;color:${COL.muted}">${isNum ? Math.round(n) + unit : "--"}</div><div class="track" style="background:${off}"><i style="width:${pct}%;background:${fill}"></i></div>`; break;
+      case "slider":
+        inner = `<div class="t">${title}</div><div class="v" style="top:6px;bottom:auto;left:auto;font-size:14px;color:${COL.muted}">${isNum ? Math.round(n) + unit : "--"}</div><div class="strack" style="background:${off}"><i style="width:${pct}%;background:${onc}"></i><b style="left:${pct}%"></b></div>`; break;
+      case "dropdown":
+        inner = `<div class="t">${title}</div><div class="box" style="background:${off}"><span>${esc(w.entity ? this._selection(w) : "--")}</span><span>▾</span></div>`; break;
+      case "roller":
+        inner = `<div class="t">${title}</div><div class="box" style="background:${off};justify-content:center;font-size:18px"><span>${esc(w.entity ? this._selection(w) : "--")}</span></div>`; break;
+      case "clock":
+        inner = esc(clockText(w.format)); if (w.bg) el.style.background = w.bg; break;
+      case "panel":
+        el.style.background = w.bg || COL.card;
+        inner = w.label ? `<div class="t">${title}</div>` : ""; break;
+      case "media": {
+        const t = attrs.media_title || (w.entity ? state || "--" : "--");
+        const vol = typeof attrs.volume_level === "number" ? Math.round(attrs.volume_level * 100) : 0;
+        if (w.bg) el.style.background = w.bg;
+        inner = `<div class="t">${esc(t)}</div><div class="a">${esc(attrs.media_artist || w.label || "")}</div>
+          <div class="ctl" style="top:${Math.round(w.h * 0.38)}px;color:${w.fg || COL.text}"><span>⏮</span><span style="color:${onc}">${state === "playing" ? "⏸" : "▶"}</span><span>⏭</span></div>
+          <div class="strack" style="background:${off}"><i style="width:${vol}%;background:${onc}"></i><b style="left:${vol}%"></b></div>`; break;
+      }
+      case "thermostat": {
+        const cur = attrs.current_temperature, tgt = attrs.temperature;
+        if (w.bg) el.style.background = w.bg;
+        inner = `<div class="t">${title}${state ? " · " + esc(state) : ""}${cur !== undefined ? " · " + esc(cur) + "°" : ""}</div><div class="thermo"><em style="color:${onc}">−</em><big>${tgt !== undefined && tgt !== null ? esc(tgt) + "°" : "--"}</big><em style="color:${onc}">+</em></div>`; break;
+      }
       default:
-        inner = `<div class="t">${title}</div><div class="v">${state === undefined ? "--" : esc(state) + (unit ? " " + unit : "")}</div>`;
+        inner = `<div class="t">${title}</div>`;
     }
     el.innerHTML = inner + (w.id === this._selected ? '<div class="rz"></div>' : "");
   }
 
+  _selection(w) {
+    const a = this._hass?.states?.[w.entity]?.attributes || {};
+    return w.entity.startsWith("media_player.") ? a.source || "--" : this._hass?.states?.[w.entity]?.state || "--";
+  }
+
   _signature() {
-    return `${this._page}|` + this._widgets.map((w) => `${w.id}:${this._state(w)}`).join("|");
+    return `${this._page}|` + this._widgets.map((w) => `${w.id}:${this._state(w)}${this._hass?.states?.[w.entity]?.last_updated ?? ""}${w.type === "clock" ? new Date().getMinutes() : ""}`).join("|");
   }
 
   _refreshValues() {
@@ -607,43 +744,107 @@ class DisplayCard extends HTMLElement {
     return Object.keys(this._hass.states).filter((id) => !domains || domains.includes(id.split(".")[0])).sort();
   }
 
+  _colorField(key, label, value, fallback) {
+    return `<div class="field"><label>${label}</label><div class="color"><input type="color" id="p-${key}" value="${value || fallback}" ${value ? "" : 'class="unset"'}><button class="mini" id="p-${key}-x" ${value ? "" : "disabled"}>Standard</button></div></div>`;
+  }
+
   _renderProps() {
     const panel = this.shadowRoot.getElementById("props");
     if (!panel) return;
     const w = this._find(this._selected);
     if (!w) return this._renderPageProps(panel);
     if (w.type === "pager") return this._renderPagerProps(panel, w);
-    const numeric = w.type === "gauge" || w.type === "bar";
-    panel.innerHTML = `<h3>${TYPES[w.type].name}</h3>
-      <div class="field"><label>Entität</label><input id="p-entity" list="p-ents" value="${esc(w.entity)}" placeholder="sensor.temperatur" autocomplete="off"><datalist id="p-ents">${this._entityIds(w.type).map((id) => `<option value="${esc(id)}">`).join("")}</datalist></div>
+    const t = w.type, domain = w.entity.split(".")[0];
+    this._propsDomain = domain;
+    const numeric = ["gauge", "bar", "slider", "arc"].includes(t);
+    const levels = t === "gauge" || t === "bar";
+    const colors = {
+      label: ["Hintergrund", "Text", null], button: ["Farbe (aus)", "Text", "Farbe (an)"], switch: ["Schiene (aus)", "Text", "Schiene (an)"],
+      checkbox: ["Kästchen (aus)", "Text", "Kästchen (an)"], led: ["Farbe (aus)", null, "Farbe (an)"], bar: ["Spur", "Text", "Balken"], gauge: ["Spur", "Text", "Anzeige"],
+      slider: ["Spur", "Text", "Regler"], arc: ["Spur", "Text", "Regler"], dropdown: ["Feld", "Text", "Hervorhebung"], roller: ["Feld", "Text", "Hervorhebung"],
+      clock: ["Hintergrund", "Text", null], panel: ["Fläche", "Text", null], media: ["Hintergrund", "Text", "Akzent"], thermostat: ["Hintergrund", "Text", "Akzent"],
+    }[t] || [null, null, null];
+    const acts = t === "button" ? ACTIONS[domain] : null;
+    const opt = (v, text, cur) => `<option value="${v}" ${cur === v ? "selected" : ""}>${esc(text)}</option>`;
+    panel.innerHTML = `<h3>${TYPES[t].name}</h3>
+      ${NO_ENTITY(t) ? "" : `<div class="field"><label>Entität</label><input id="p-entity" list="p-ents" value="${esc(w.entity)}" placeholder="sensor.temperatur" autocomplete="off"><datalist id="p-ents">${this._entityIds(t).map((id) => `<option value="${esc(id)}">`).join("")}</datalist></div>`}
       <div class="field"><label>Beschriftung</label><input id="p-label" value="${esc(w.label)}" maxlength="31" placeholder="${esc(this._hass.states[w.entity]?.attributes.friendly_name || "")}"></div>
-      ${w.type === "label" || numeric ? `<div class="field"><label>Einheit</label><input id="p-unit" value="${esc(w.unit)}" maxlength="15" placeholder="°C"></div>` : ""}
+      ${acts ? `<div class="field"><label>Aktion</label><select id="p-action">${opt("", domain === "climate" ? "Bitte wählen" : domain === "media_player" ? "Standard (Wiedergabe / Pause)" : "Standard (umschalten)", w.action)}${acts.map(([v, n2]) => opt(v, n2, w.action)).join("")}</select></div>` : ""}
+      ${t === "button" || t === "label" ? `<div class="field"><label>Symbol</label><select id="p-icon">${opt("", "Kein Symbol", w.icon)}${Object.entries(ICONS).map(([k, [ch, n2]]) => opt(k, `${ch}  ${n2}`, w.icon)).join("")}</select></div>` : ""}
+      ${t === "label" || t === "bar" || t === "gauge" || t === "led" ? `<div class="field"><label>Attribut statt Zustand</label><input id="p-attr" value="${esc(w.attr)}" placeholder="z. B. battery" autocomplete="off"></div>` : ""}
+      ${["label", "bar", "gauge", "slider", "arc"].includes(t) ? `<div class="field"><label>Einheit</label><input id="p-unit" value="${esc(w.unit)}" maxlength="15" placeholder="°C"></div>` : ""}
       ${numeric ? `<div class="two"><div class="field"><label>Min</label><input id="p-min" type="number" value="${w.min}"></div><div class="field"><label>Max</label><input id="p-max" type="number" value="${w.max}"></div></div>` : ""}
+      ${levels ? `<div class="two"><div class="field"><label>Warnung ab</label><input id="p-warn" type="number" step="any" value="${w.warn ?? ""}"></div><div class="field"><label>Kritisch ab</label><input id="p-crit" type="number" step="any" value="${w.crit ?? ""}"></div></div>
+        <label class="check"><input type="checkbox" id="p-invert" ${w.invert ? "checked" : ""}> Schwellen gelten für Werte darunter</label>` : ""}
+      ${t === "clock" ? `<div class="field"><label>Format</label><select id="p-format">${FORMATS.map(([v, n2]) => opt(v, n2, w.format)).join("")}</select></div>` : ""}
+      ${colors[0] ? this._colorField("bg", colors[0], w.bg, COL.off) : ""}
+      ${colors[2] ? this._colorField("on", colors[2], w.on, COL.on) : ""}
+      ${colors[1] ? this._colorField("fg", colors[1], w.fg, COL.text) : ""}
       <div class="two"><div class="field"><label>X</label><input id="p-x" type="number" value="${w.x}"></div><div class="field"><label>Y</label><input id="p-y" type="number" value="${w.y}"></div></div>
       <div class="two"><div class="field"><label>Breite</label><input id="p-w" type="number" value="${w.w}"></div><div class="field"><label>Höhe</label><input id="p-h" type="number" value="${w.h}"></div></div>
       <button class="btn danger" id="p-del">Element löschen</button>`;
-    const bind = (id, apply) => panel.querySelector(id)?.addEventListener("input", (e) => {
-      apply(e.target.value);
+    const repaint = () => {
       this._setDirty(true);
       const el = this.shadowRoot.querySelector(`.w[data-id="${w.id}"]`);
       if (el) this._paint(el, w);
-    });
+    };
+    const bind = (id, apply, ev = "input") => panel.querySelector(id)?.addEventListener(ev, (e) => { apply(e.target.value, e.target); repaint(); });
+    const [minW, minH] = minSize(t);
     bind("#p-entity", (v) => { w.entity = v.trim(); this._sig = ""; });
+    panel.querySelector("#p-entity")?.addEventListener("change", () => this._entityChanged(w));
     bind("#p-label", (v) => { w.label = cutBytes(v, 31); });
     bind("#p-unit", (v) => { w.unit = cutBytes(v, 15); });
+    bind("#p-attr", (v) => { w.attr = v.trim().toLowerCase().replace(/[^a-z0-9_]/g, "").slice(0, 23); });
     bind("#p-min", (v) => { w.min = Math.round(num(v, 0)); });
     bind("#p-max", (v) => { w.max = Math.round(num(v, 100)); });
+    bind("#p-warn", (v) => { w.warn = v === "" ? null : num(v, null); });
+    bind("#p-crit", (v) => { w.crit = v === "" ? null : num(v, null); });
+    bind("#p-invert", (v, el) => { w.invert = el.checked; }, "change");
+    bind("#p-format", (v) => { w.format = v; }, "change");
+    bind("#p-icon", (v) => { w.icon = v; }, "change");
+    bind("#p-action", (v) => { w.action = v; if (v && !w.icon && ACTION_ICON[v]) w.icon = ACTION_ICON[v]; this._renderProps(); }, "change");
+    for (const key of ["bg", "on", "fg"]) {
+      bind(`#p-${key}`, (v) => { w[key] = v; });
+      panel.querySelector(`#p-${key}`)?.addEventListener("input", (e) => { e.target.classList.remove("unset"); const x = panel.querySelector(`#p-${key}-x`); if (x) x.disabled = false; });
+      panel.querySelector(`#p-${key}-x`)?.addEventListener("click", () => { w[key] = ""; repaint(); this._renderProps(); });
+    }
     bind("#p-x", (v) => { w.x = clamp(Math.round(num(v, 0)), 0, this._W - w.w); });
     bind("#p-y", (v) => { w.y = clamp(Math.round(num(v, 0)), 0, this._H - w.h); });
-    bind("#p-w", (v) => { w.w = clamp(Math.round(num(v, w.w)), MIN_SIZE, this._W - w.x); });
-    bind("#p-h", (v) => { w.h = clamp(Math.round(num(v, w.h)), MIN_SIZE, this._H - w.y); });
+    bind("#p-w", (v) => { w.w = clamp(Math.round(num(v, w.w)), minW, this._W - w.x); });
+    bind("#p-h", (v) => { w.h = clamp(Math.round(num(v, w.h)), minH, this._H - w.y); });
     panel.querySelector("#p-del").addEventListener("click", () => this._remove(w.id));
+  }
+
+  // After the entity was typed/chosen: fit range and action to what it can do.
+  _entityChanged(w) {
+    const domain = w.entity.split(".")[0];
+    const attrs = this._hass.states[w.entity]?.attributes || {};
+    const before = JSON.stringify([w.min, w.max, w.action]);
+    if (w.type === "slider" || w.type === "arc") {
+      if (domain === "input_number" || domain === "number") {
+        w.min = Math.round(num(attrs.min, 0));
+        w.max = Math.round(num(attrs.max, 100));
+        if (w.max <= w.min) w.max = w.min + 1;
+      } else { w.min = 0; w.max = 100; }
+    }
+    if (w.type === "button") {
+      const valid = (ACTIONS[domain] || []).map(([v]) => v);
+      if (!valid.includes(w.action)) w.action = domain === "climate" ? "temp_up" : "";
+    }
+    // Re-render the form only when its fields changed: it would steal the focus of whatever the user clicked next.
+    if (before !== JSON.stringify([w.min, w.max, w.action]) || (w.type === "button" && domain !== this._propsDomain)) {
+      this._setDirty(true);
+      this._renderProps();
+    }
+    const el = this.shadowRoot.querySelector(`.w[data-id="${w.id}"]`);
+    if (el) this._paint(el, w);
   }
 
   _renderPageProps(panel) {
     const page = this._pages[this._page];
     panel.innerHTML = `<h3>Seite ${this._page + 1} von ${this._pages.length}</h3>
       <div class="field"><label>Name der Seite</label><input id="pg-name" value="${esc(page.name)}" placeholder="z. B. Wohnzimmer"></div>
+      ${this._colorField("pgbg", "Hintergrundfarbe", page.bg, "#0f0f1a")}
       <div class="two"><button class="btn" id="pg-left" ${this._page === 0 ? "disabled" : ""}>◀ Nach vorn</button><button class="btn" id="pg-right" ${this._page === this._pages.length - 1 ? "disabled" : ""}>Nach hinten ▶</button></div>
       <div class="two" style="margin-top:6px"><button class="btn" id="pg-dup" ${this._pages.length >= MAX_PAGES ? "disabled" : ""}>Duplizieren</button><button class="btn danger" id="pg-del" ${this._pages.length < 2 ? "disabled" : ""}>Löschen</button></div>
       <div class="empty" style="margin-top:12px">${this._widgets.length} von ${MAX_WIDGETS} Elementen auf dieser Seite.<br>Element aus der Palette ziehen oder anklicken, dann Entität und Beschriftung festlegen.<br>Pfeiltasten verschieben, Entf löscht.<br><br>Mit dem <b>Seitenwechsel</b> aus der Palette bekommt das Display Pfeile zum Blättern. Position und Größe bestimmst du frei; er gilt für alle Seiten.</div>`;
@@ -655,6 +856,15 @@ class DisplayCard extends HTMLElement {
       const el = this.shadowRoot.querySelector(`.w[data-id="${PAGER_ID}"]`);
       if (el) this._paint(el, this._pager);
     });
+    const bgInput = panel.querySelector("#p-pgbg"), bgReset = panel.querySelector("#p-pgbg-x");
+    bgInput.addEventListener("input", (e) => {
+      page.bg = e.target.value;
+      e.target.classList.remove("unset");
+      bgReset.disabled = false;
+      this._setDirty(true);
+      this.shadowRoot.getElementById("screen").style.background = page.bg;
+    });
+    bgReset.addEventListener("click", () => { page.bg = ""; this._setDirty(true); this._draw(); this._renderProps(); });
     panel.querySelector("#pg-left").addEventListener("click", () => this._movePage(-1));
     panel.querySelector("#pg-right").addEventListener("click", () => this._movePage(1));
     panel.querySelector("#pg-dup").addEventListener("click", () => this._addPage(true));

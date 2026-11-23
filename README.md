@@ -41,7 +41,7 @@ T_IRQ (IO27) und der Piezo-Treiber (IO26) werden von der Firmware nicht genutzt.
 
 Die Karte wird automatisch geladen, ein manueller Ressourcen-Eintrag ist nicht nötig. Jedes Display bekommt außerdem einen Sensor **„Verbunden“** (z. B. für eine Automatisierung „Display offline“).
 
-**Es gibt kein Home-Assistant-Token.** Die Displays reden nur mit der Integration, und die spricht innerhalb von Home Assistant mit allem anderen. Ein Display kennt nur seinen eigenen Gerätecode. Ein gestohlenes Display kann damit höchstens die Elemente bedienen, die in *seinem* Layout liegen (Licht, Schalter, Skripte, Szenen, Taster …) – keine Schlösser, Alarmanlagen oder beliebige Dienste. Mit „Display bearbeiten → Neuen Gerätecode erzeugen“ sperrst du ein Display sofort aus.
+**Es gibt kein Home-Assistant-Token.** Die Displays reden nur mit der Integration, und die spricht innerhalb von Home Assistant mit allem anderen. Ein Display kennt nur seinen eigenen Gerätecode. Ein gestohlenes Display kann damit höchstens die Elemente bedienen, die in *seinem* Layout liegen (Licht, Schalter, Skripte, Szenen, Medien, Thermostate …) – keine Schlösser, Alarmanlagen oder beliebige Dienste. Mit „Display bearbeiten → Neuen Gerätecode erzeugen“ sperrst du ein Display sofort aus.
 
 ### 2. Firmware flashen
 
@@ -108,12 +108,22 @@ device: Küche      # optional: ohne Angabe wählst du das Display in der Karte 
 
 | Element | Zweck | Bedienung am Display |
 |---|---|---|
-| Wert | Zustand mit optionaler Einheit | – |
-| Taster | leuchtet, wenn `on` | tippen: `button`/`input_button` → drücken, `scene`/`script` → starten, sonst umschalten |
-| Anzeige | Ringanzeige mit Min/Max | – |
-| Schalter | Ein/Aus | tippen: ein-/ausschalten |
-| Balken | Fortschrittsbalken mit Wert | – |
+| Wert | Zustand oder Attribut mit Einheit, optional mit Symbol | – |
+| Taster | Farbe wechselt bei „an“, Symbol möglich, feste Aktion wählbar | tippen: `button`/`input_button` → drücken, `scene`/`script` → starten, Medien/Rollladen/Staubsauger/Thermostat → gewählte Aktion, sonst umschalten |
+| Schalter, Kästchen | Ein/Aus | tippen |
+| Schieber, Drehregler | Helligkeit, Rollladenposition, Lüfter, Lautstärke, `input_number`/`number` | ziehen |
+| Anzeige, Balken | Wert mit Min/Max, Farbe wechselt bei Warn-/Kritisch-Schwelle (auch „darunter“) | – |
+| LED | Statuspunkt (an/aus-Farbe) | – |
+| Auswahl, Rad | `select`, `input_select`, Quelle eines Mediaplayers | wählen |
+| Uhr | Uhrzeit/Datum (Zeit und Zeitzone kommen von Home Assistant) | – |
+| Fläche | Rechteck zum Gruppieren und Einfärben | – |
+| Medien | Titel, Interpret, Zurück/Wiedergabe/Weiter, Lautstärke | tippen, ziehen |
+| Thermostat | Ist- und Solltemperatur, `−`/`+` (Schritt und Grenzen aus dem Gerät) | tippen |
 | Seitenwechsel | `<` Name `>` | tippen: nächste/vorherige Seite |
+
+**Farben:** Jede Seite hat eine Hintergrundfarbe, jedes Element Farbe (aus), Farbe (an) und Textfarbe. „Standard“ setzt zurück. Als „an“ gelten die Zustände `on`, `open`, `playing`, `home`, `heat` und ähnliche. **Symbole** (36, z. B. Ein/Aus, Play, Haus) lassen sich bei Taster und Wert setzen. Das Format aller Felder und Nachrichten steht in [docs/protocol.md](docs/protocol.md).
+
+**Bewusst nicht bedienbar:** Schlösser und Alarmanlagen (ein gestohlenes Display soll keine Tür öffnen). Anzeigen sind möglich.
 
 Grenzen: höchstens 8 Seiten mit je 32 Elementen, Beschriftung und Seitenname ≤ 31 und Einheit ≤ 15 Bytes (Umlaute und ° zählen doppelt). Umlaute, `°` und `€` werden dargestellt.
 

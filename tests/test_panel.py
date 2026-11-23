@@ -208,7 +208,12 @@ async def test_taps_are_rate_limited(hass, make_entry, hass_client_no_auth, monk
 async def test_a_layout_cannot_give_a_panel_dangerous_entities(hass, make_entry):
     from custom_components.display.layouts import validate_widgets  # noqa: PLC0415
     import voluptuous as vol  # noqa: PLC0415
-    for entity in ("lock.front_door", "alarm_control_panel.home", "climate.living"):
+    for entity in ("lock.front_door", "alarm_control_panel.home"):
+        with pytest.raises(vol.Invalid):
+            validate_widgets([{**BTN, "entity": entity}])
+        with pytest.raises(vol.Invalid):
+            validate_widgets([{**SW, "entity": entity}])
+    for entity in ("climate.living",):                                # a thermostat needs an explicit action, no plain toggle
         with pytest.raises(vol.Invalid):
             validate_widgets([{**BTN, "entity": entity}])
         with pytest.raises(vol.Invalid):

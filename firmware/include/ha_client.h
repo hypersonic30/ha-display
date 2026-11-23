@@ -45,6 +45,14 @@ const char *ha_client_error();
 void ha_client_tap(const char *widget_id);
 void ha_client_set(const char *widget_id, bool on);
 
+void ha_client_set_value(const char *widget_id, float value);          // slider, arc, media volume
+void ha_client_set_option(const char *widget_id, const char *option);  // dropdown, roller
+void ha_client_act(const char *widget_id, const char *action);         // media: prev/play_pause/next, thermostat: temp_up/temp_down
+
+// Frames other than layout/states/ota/error ("options", "time"): called with the frame type and the frame.
+typedef void (*frame_cb_t)(const char *type, JsonObjectConst frame);
+void ha_client_on_frame(frame_cb_t cb);
+
 // Page switch (dir > 0: next, dir < 0: previous). The integration answers with a new layout frame.
 void ha_client_page(int dir);
 

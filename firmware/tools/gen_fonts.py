@@ -2,7 +2,9 @@
 """Generate LVGL 8 fonts (Latin-1 + Euro, 4 bpp, uncompressed) from a TTF.
 
 Needs Pillow with FreeType. Output: src/fonts/ui_font_<size>.c (committed, so
-this tool is only needed to change sizes or ranges).
+this tool is only needed to change sizes or ranges). The LVGL symbols used by the
+panel's `icon` field are rendered from LVGL's FontAwesome file into the same fonts
+(FontAwesome5-Solid+Brands+Regular.woff lies next to the Montserrat TTF).
 
   python3 tools/gen_fonts.py .pio/libdeps/esp32/lvgl/scripts/built_in_font/Montserrat-Medium.ttf
 """
@@ -11,7 +13,13 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 SIZES = (12, 14, 16, 20, 24)
+CLOCK_SIZES = (32, 48)
+CLOCK_RANGES = [(0x20, 0x20), (0x2D, 0x3A)]  # space - . / 0-9 :
 RANGES = [(0x20, 0x7E), (0xA0, 0xFF), (0x20AC, 0x20AC)]  # Latin-1 + Euro
+# LVGL symbol codepoints (LV_SYMBOL_*) behind the icon names in docs/protocol.md
+SYMBOLS = [0xF001, 0xF008, 0xF00B, 0xF00C, 0xF00D, 0xF011, 0xF013, 0xF2ED, 0xF015, 0xF021, 0xF026, 0xF028,
+           0xF03E, 0xF304, 0xF048, 0xF04B, 0xF04C, 0xF04D, 0xF051, 0xF053, 0xF054, 0xF067, 0xF068, 0xF06E,
+           0xF071, 0xF074, 0xF077, 0xF078, 0xF079, 0xF0E7, 0xF0F3, 0xF124, 0xF1EB, 0xF240, 0xF287, 0xF293]
 
 
 def render(font, ch):
@@ -34,15 +42,16 @@ def render(font, ch):
     return adv, w, h, x0, -y1, data
 
 
-def gen(ttf, size):
+def gen(ttf, size, awesome, ranges=None, name=None):
     font = ImageFont.truetype(ttf, size, layout_engine=ImageFont.Layout.BASIC)
+    icons = ImageFont.truetype(awesome, size, layout_engine=ImageFont.Layout.BASIC)
     ascent, descent = font.getmetrics()
     bitmap, dscs, cmaps = bytearray(), [], []
     gid = 1
-    for lo, hi in RANGES:
+    for lo, hi in (ranges if ranges else RANGES + [(cp, cp) for cp in SYMBOLS]):
         cmaps.append((lo, hi - lo + 1, gid))
         for cp in range(lo, hi + 1):
-            adv, w, h, ox, oy, data = render(font, chr(cp))
+            adv, w, h, ox, oy, data = render(icons if cp in SYMBOLS else font, chr(cp))
             dscs.append((len(bitmap) if data else 0, adv, w, h, ox, oy))
             bitmap += data
             gid += 1
@@ -66,7 +75,7 @@ def gen(ttf, size):
             "    .glyph_bitmap = glyph_bitmap, .glyph_dsc = glyph_dsc, .cmaps = cmaps,",
             "    .kern_dsc = NULL, .kern_scale = 0, .cmap_num = %d, .bpp = 4," % len(cmaps),
             "    .kern_classes = 0, .bitmap_format = 0, .cache = &cache};", "",
-            f"const lv_font_t ui_font_{size} = {{",
+            f"const lv_font_t {name or f'ui_font_{size}'} = {{",
             "    .get_glyph_dsc = lv_font_get_glyph_dsc_fmt_txt,",
             "    .get_glyph_bitmap = lv_font_get_bitmap_fmt_txt,",
             f"    .line_height = {ascent + descent}, .base_line = {descent},",
@@ -77,12 +86,17 @@ def gen(ttf, size):
 
 def main():
     ttf = sys.argv[1]
+    awesome = str(Path(ttf).with_name("FontAwesome5-Solid+Brands+Regular.woff"))
     dest = Path(__file__).resolve().parent.parent / "src" / "fonts"
     dest.mkdir(parents=True, exist_ok=True)
     for size in SIZES:
-        text, n = gen(ttf, size)
+        text, n = gen(ttf, size, awesome)
         (dest / f"ui_font_{size}.c").write_text(text)
         print(f"ui_font_{size}.c: {n} bitmap bytes")
+    for size in CLOCK_SIZES:  # big digits for the clock widget only
+        text, n = gen(ttf, size, awesome, CLOCK_RANGES, f"ui_clock_{size}")
+        (dest / f"ui_clock_{size}.c").write_text(text)
+        print(f"ui_clock_{size}.c: {n} bitmap bytes")
 
 
 if __name__ == "__main__":
