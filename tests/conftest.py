@@ -17,9 +17,12 @@ def auto_enable_custom_integrations(enable_custom_integrations):
 
 
 @pytest.fixture(autouse=True)
-async def frontend_first(hass, auto_enable_custom_integrations):
-    """The integration depends on the frontend. Set it up before any test client freezes the HTTP router."""
-    assert await async_setup_component(hass, "frontend", {})
+async def integration_first(hass, auto_enable_custom_integrations):
+    """Set the integration (and its frontend dependency) up before any test client freezes the HTTP router.
+
+    Home Assistant lifts that freeze at runtime; the test server does not, so registering the card's static path
+    later would fail only in the tests."""
+    assert await async_setup_component(hass, DOMAIN, {})
 
 
 async def make_token(hass, *, long_lived: bool = True, name: str = "panel", admin: bool = False) -> str:
