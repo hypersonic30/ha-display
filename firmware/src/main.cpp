@@ -8,6 +8,7 @@
 #include "ui.h"
 #include "ha_client.h"
 #include "widgets.h"
+#include "ota.h"
 
 // ── Display, touch & LVGL ─────────────────────────────────────────────────────
 
@@ -236,6 +237,7 @@ static void on_entity_state(const char *entity_id, const char *state_val) {
 }
 
 static void on_layout(JsonObjectConst ev) {
+    if (ota_running()) return;   // the update screen stays until the download is over
     int brightness = ev["settings"]["brightness"] | 0;
     if (brightness > 0) set_brightness(brightness);
 
@@ -282,10 +284,26 @@ static void check_ha_status() {
     }
 }
 
+// A queued firmware update: blocks in ota_run() and restarts on success. On failure show why, then go back to
+// normal operation; the connection is re-opened so the integration sends the layout again.
+static void run_ota() {
+    if (ota_run(cfg)) return;
+    char msg[140];
+    snprintf(msg, sizeof(msg), "Update fehlgeschlagen:\n%s", ota_last_error());
+    screen_error(msg);
+    for (uint32_t t0 = millis(); millis() - t0 < 4000;) { lv_task_handler(); ha_client_tick(); delay(5); }
+    last_ha_status = HA_CONNECTING;
+    ui_show_running(cfg.ha_url);
+    status_screen = true;
+    built_rev = -1; built_page = -1;
+    ha_client_resync();
+}
+
 // ── Setup ─────────────────────────────────────────────────────────────────────
 
 void setup() {
     Serial.begin(115200);
+    ota_boot_check();   // a new image that keeps failing is rolled back before it can do more harm
     tft_init();
     touch_init();
     lvgl_init();
@@ -310,6 +328,7 @@ void loop() {
         lv_obj_invalidate(lv_scr_act());   // the layout objects are still there, only the pixels are gone
     }
     lv_task_handler();
+    ota_loop_tick(WiFi.status() == WL_CONNECTED);
 
     if (state != PROVISIONING && status_screen && touch_hold_ms() >= HOLD_MS) {
         press_since = 0;
@@ -369,6 +388,7 @@ void loop() {
         break;
 
     case RUNNING:
+        if (ota_pending()) { run_ota(); break; }
         ha_client_tick();
         check_ha_status();
         break;

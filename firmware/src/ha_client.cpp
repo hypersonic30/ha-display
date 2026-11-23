@@ -4,6 +4,7 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <strings.h>
+#include "ota.h"
 
 static WebSocketsClient ws;
 static state_cb_t  _on_state  = nullptr;
@@ -82,7 +83,8 @@ static void send_hello() {
     JsonDocument doc;
     doc["type"] = "hello";
     doc["key"]  = _cfg.device_key;
-    doc["fw"]   = FW_VERSION;
+    doc["fw"]      = FW_VERSION;
+    doc["variant"] = FW_VARIANT;
     ws_send(doc);
     Serial.println("[HA] hello");
 }
@@ -106,6 +108,10 @@ static void handle_message(const char *payload, size_t length) {
             const char *s = kv.value().as<const char *>();
             if (s) _on_state(kv.key().c_str(), s);
         }
+
+    } else if (strcmp(type, "ota") == 0) {
+        // Only noted here; the blocking download runs from loop() (see ota.cpp).
+        ota_request(doc["version"] | "", doc["path"] | "", doc["size"] | 0u, doc["md5"] | "");
 
     } else if (strcmp(type, "error") == 0) {
         const char *code = doc["code"] | "";
@@ -183,6 +189,24 @@ void ha_client_tick() {
 
 HaStatus ha_client_status() { return _status; }
 const char *ha_client_error() { return _error; }
+
+void ha_client_ota_status(const char *state, int progress, const char *error) {
+    if (!_connected) return;
+    JsonDocument doc;
+    doc["type"]  = "ota_status";
+    doc["state"] = state;
+    if (strcmp(state, "downloading") == 0) doc["progress"] = progress;
+    if (error) {
+        char text[81];
+        strlcpy(text, error, sizeof(text));
+        doc["error"] = text;
+    }
+    ws_send(doc);
+}
+
+void ha_client_resync() {
+    if (!_halted) ws.disconnect();
+}
 
 void ha_client_tap(const char *widget_id) {
     if (!_connected || !_have_layout || !widget_id || !widget_id[0]) return;

@@ -1,0 +1,17 @@
+{
+  "version": "0.3.0",
+  "variants": {
+    "ili9488": {
+      "file": "firmware-ili9488.bin",
+      "size": 1498016,
+      "md5": "7689d5a07d38fc4c1ebf0a87b69e5195",
+      "sha256": "bdbe3b5711d47af38a49d00c8d5deaf6ca93a7c5cc71048674c547f4bded50f0"
+    },
+    "ili9481": {
+      "file": "firmware-ili9481.bin",
+      "size": 1497952,
+      "md5": "8b71cf73da97c5d66a5456ca9a526875",
+      "sha256": "e9b224489b6fffa7e05b069db3fc256a14e5159e1f6c8b874d926aca58427406"
+    }
+  }
+}

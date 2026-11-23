@@ -6,6 +6,7 @@ Selbstgebautes Touch-Panel (ESP32 + ILI9488 480×320) für Home Assistant. Das L
 - **Visueller Editor** (Lovelace-Karte): Elemente ziehen, Entität wählen, speichern
 - **Mehrere Seiten** pro Display mit frei platzierbarem **Seitenwechsel** (Pfeile links/rechts, Seitenname oder Nummer in der Mitte)
 - **Hoch- oder Querformat**, pro Display einstellbar
+- **Firmware-Updates über WLAN (OTA)**, direkt aus der Karte oder aus Home Assistants Update-Seite
 - **Fertige Firmware** zum Flashen, Ersteinrichtung per WLAN-Hotspot am Handy
 - **Live-Werte** und **Touch-Bedienung** (Taster, Schalter) direkt am Display
 - Alles aus einem Repository, Installation über **HACS**
@@ -60,6 +61,15 @@ esptool.py --chip esp32 --port /dev/ttyUSB0 --baud 921600 write_flash \
 ```
 
 (Windows: Port z. B. `COM3`.) Bleibt das Display weiß oder zeigt Müll, ist es der falsche Controller. Sind beim ILI9481 Rot und Blau vertauscht oder die Farben negativ, siehe die Hinweise in `firmware/platformio.ini`. Beim ersten Start kalibrierst du den Touch: die Markierungen an den Ecken antippen. Die Werte werden gespeichert; **beim Einschalten 3 s den Touch halten** kalibriert neu.
+
+### Firmware später aktualisieren (OTA)
+
+Das **erste** Flashen geschieht per Kabel (siehe oben). Danach brauchst du es nicht mehr: Die Firmware-Images liegen in der Integration, die Karte zeigt die Version deines Displays an, und ist eine neuere da, erscheint **„Firmware 0.3.0 → 0.3.1 verfügbar“** mit einem Knopf **Aktualisieren**. Dasselbe findest du unter Einstellungen → System → Updates (Entität „Firmware“ je Display).
+
+- Das Display muss eingeschaltet und verbunden sein. Es lädt das Image von deiner Home-Assistant-Instanz (mit seinem Gerätecode), prüft die Prüfsumme, zeigt einen Fortschrittsbalken und startet neu. Währenddessen nicht ausschalten.
+- **Rückfall:** Startet die neue Firmware nicht richtig (Absturz-Schleife), schaltet das Display nach wenigen Neustarts automatisch auf die vorherige Firmware zurück. Das Update-Angebot bleibt dann bestehen, und ein Fehler wird angezeigt.
+- Die Integration bringt die Images mit; welche Version zu welchem Display passt (ILI9488 oder ILI9481), erkennt sie selbst.
+- Ein Display mit einer Firmware **vor 0.3.0** kann nicht per OTA aktualisiert werden und muss einmal per Kabel geflasht werden.
 
 ### 3. Display einrichten
 
@@ -139,6 +149,8 @@ cd firmware && pio run -e ili9481      # nur eine Variante
 ```
 
 Die Fonts (Montserrat mit Latin-1 und €) liegen fertig in `firmware/src/fonts/`; neu erzeugen mit `python firmware/tools/gen_fonts.py`.
+
+**Firmware veröffentlichen:** `firmware/VERSION` erhöhen (nur bei Firmware-Änderungen; die Versionsnummer der Integration ist unabhängig), `pio run`, dann `python firmware/tools/package_firmware.py`. Das Skript legt die Images in `custom_components/display/firmware/` (für OTA) und `firmware/bin/` (für `esptool`) ab und verweigert veraltete Builds. Ein Test stellt sicher, dass beides zusammenpasst.
 
 Tests:
 

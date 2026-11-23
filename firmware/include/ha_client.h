@@ -3,8 +3,9 @@
 #include <ArduinoJson.h>
 #include "storage.h"
 
-#ifndef FW_VERSION
-#define FW_VERSION "0.2.0"
+// Both come from tools/version.py (firmware/VERSION and the PlatformIO environment name).
+#if !defined(FW_VERSION) || !defined(FW_VARIANT)
+#error "FW_VERSION / FW_VARIANT are set by tools/version.py (extra_scripts)"
 #endif
 
 enum HaStatus {
@@ -46,3 +47,10 @@ void ha_client_set(const char *widget_id, bool on);
 
 // Page switch (dir > 0: next, dir < 0: previous). The integration answers with a new layout frame.
 void ha_client_page(int dir);
+
+// Report the progress of a firmware update to the integration.
+// state: "downloading" (progress 0..100), "done", or "error" (short ASCII text).
+void ha_client_ota_status(const char *state, int progress = 0, const char *error = nullptr);
+
+// Drop the connection and let the library reconnect: the integration then sends the layout again.
+void ha_client_resync();

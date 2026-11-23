@@ -12,7 +12,7 @@ PAGE = """<!doctype html><meta charset=utf-8><body><script type="module" src="/d
 window.__calls = [];
 window.__stub = {};
 window.mount = (config, states) => {
-  const hass = { states, callWS: async (msg) => {
+  const hass = { states, callService: async (d, sv, data) => { window.__calls.push({ type: "service", domain: d, service: sv, data }); if (window.__serviceError) throw new Error(window.__serviceError); }, callWS: async (msg) => {
       window.__calls.push(JSON.parse(JSON.stringify(msg)));
       const h = window.__stub[msg.type];
       if (!h) throw { code: "not_found", message: "no stub for " + msg.type };
@@ -50,9 +50,10 @@ STATES = {
     "sensor.temp": {"entity_id": "sensor.temp", "state": "21.5", "attributes": {"friendly_name": "Temperatur"}},
     "light.kitchen": {"entity_id": "light.kitchen", "state": "on", "attributes": {}},
     "sensor.humidity": {"entity_id": "sensor.humidity", "state": "40", "attributes": {}},
+    "binary_sensor.kueche_verbunden": {"entity_id": "binary_sensor.kueche_verbunden", "state": "on", "attributes": {"device_class": "connectivity"}},
 }
 W1 = {"id": "w1", "type": "label", "entity": "sensor.temp", "label": "Temp", "unit": "°C", "min": 0, "max": 100, "x": 10, "y": 10, "w": 150, "h": 70}
-DEVICES = {"devices": [{"id": "D1", "name": "Küche", "online": True}, {"id": "D2", "name": "Bad", "online": False}]}
+DEVICES = {"devices": [{"id": "D1", "name": "Küche", "online": False, "update_entity": "update.kuche_firmware", "connected_entity": "binary_sensor.kueche_verbunden"}, {"id": "D2", "name": "Bad", "online": False, "update_entity": None, "connected_entity": None}]}
 
 def layouts(extra=None):
     store = {"D1": [dict(W1)], "D2": []}
@@ -100,7 +101,7 @@ with sync_playwright() as p:
     mount(pg, stub())
     check("first display selected, layout painted", sh(pg, "r.getElementById('dev').value") == "D1" and sh(pg, "r.querySelectorAll('.w').length") == 1)
     check("live value and unit in the preview", "21.5 °C" in sh(pg, "r.querySelector('.w .v').textContent"), sh(pg, "r.querySelector('.w .v').textContent"))
-    check("connected dot is on for an online panel", sh(pg, "r.getElementById('dot').classList.contains('on')"))
+    check("the connected dot follows the sensor even with a German entity id (…_verbunden)", sh(pg, "r.getElementById('dot').classList.contains('on')"))
     check("save is disabled until something changes", sh(pg, "r.getElementById('save').disabled"))
     mount(pg, stub(), {"device": "bad"})
     check("config 'device' picks the display (case-insensitive) and fixes the select", sh(pg, "r.getElementById('dev').value") == "D2" and sh(pg, "r.getElementById('dev').disabled"))
@@ -190,6 +191,35 @@ with sync_playwright() as p:
     mount(pg, stub(notAdmin=True))
     pg.click("display-card >> #setup"); pg.wait_for_timeout(200)
     check("non-admins get a clear message instead of the token", "Administratoren" in sh(pg, "r.getElementById('msg').textContent") and "SECRET" not in sh(pg, "r.innerHTML"))
+
+    # ── firmware update ────────────────────────────────────────────────────────
+    def fw_state(state, installed, latest="0.3.0", **attrs):
+        return {**STATES, "update.kuche_firmware": {"entity_id": "update.kuche_firmware", "state": state, "attributes": {"installed_version": installed, "latest_version": latest, **attrs}}}
+    fw = lambda: sh(pg, "r.getElementById('fw').textContent")
+    btn = lambda: sh(pg, "({hidden: r.getElementById('fwbtn').hidden, disabled: r.getElementById('fwbtn').disabled})")
+    mount(pg, stub(), None, fw_state("on", "0.2.9"))
+    check("an available update is announced with both versions and a button", fw() == "Firmware 0.2.9 → 0.3.0 verfügbar" and btn() == {"hidden": False, "disabled": False}, (fw(), btn()))
+    pg.evaluate("() => { window.__confirm = false }"); pg.click("display-card >> #fwbtn"); pg.wait_for_timeout(100)
+    check("declining the prompt installs nothing", not calls(pg, "service"))
+    pg.evaluate("() => { window.__confirm = true }"); pg.click("display-card >> #fwbtn"); pg.wait_for_timeout(200)
+    svc = calls(pg, "service")
+    check("accepting calls update.install for this display's entity", svc and svc[-1]["domain"] == "update" and svc[-1]["service"] == "install" and svc[-1]["data"] == {"entity_id": "update.kuche_firmware"}, svc)
+    check("success is reported", "aktualisiert" in sh(pg, "r.getElementById('msg').textContent"))
+    pg.evaluate("() => { window.__serviceError = 'Display nicht verbunden' }"); pg.click("display-card >> #fwbtn"); pg.wait_for_timeout(200)
+    check("a failed update shows Home Assistant's reason", "Display nicht verbunden" in sh(pg, "r.getElementById('msg').textContent"))
+    pg.evaluate("() => { window.__serviceError = null }")
+    mount(pg, stub(), None, fw_state("off", "0.3.0"))
+    check("an up-to-date display only shows its version", fw() == "Firmware 0.3.0" and btn()["hidden"], (fw(), btn()))
+    mount(pg, stub(), None, fw_state("on", "0.2.9", in_progress=True, update_percentage=42))
+    check("while updating the percentage is shown and the button is locked", fw() == "Update läuft … 42 %" and btn() == {"hidden": False, "disabled": True}, (fw(), btn()))
+    mount(pg, stub(), None, fw_state("unknown", None))
+    check("an old firmware without version asks for one cable flash", "per Kabel" in fw() and btn()["hidden"], fw())
+    mount(pg, stub(), None, {**STATES, "update.kuche_firmware": {"entity_id": "update.kuche_firmware", "state": "on", "attributes": {"installed_version": "0.2.9", "latest_version": "0.3.0"}}, "binary_sensor.kueche_verbunden": {"entity_id": "binary_sensor.kueche_verbunden", "state": "off", "attributes": {"device_class": "connectivity"}}})
+    check("an offline display cannot be updated", btn() == {"hidden": False, "disabled": True}, btn())
+    mount(pg, stub(), None, STATES)
+    check("without an update entity nothing about firmware is shown", fw() == "" and btn()["hidden"])
+    pg.select_option("display-card >> #dev", "D2"); pg.wait_for_timeout(200)
+    check("a display without an update entity shows nothing either", fw() == "" and btn()["hidden"])
 
     # ── pages ──────────────────────────────────────────────────────────────────
     mount(pg, stub())

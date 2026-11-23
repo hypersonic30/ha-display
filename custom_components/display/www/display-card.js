@@ -150,6 +150,7 @@ class DisplayCard extends HTMLElement {
           <span class="dot" id="dot" title="Display verbunden?"></span>
           <select id="dev" ${fixed ? "disabled" : ""}>${this._devices.map((d) => `<option value="${esc(d.id)}">${esc(d.name)}</option>`).join("")}</select>
           <span class="dim" id="res"></span>
+          <span class="dim" id="fw"></span><button class="btn" id="fwbtn" hidden>Aktualisieren</button>
           <button class="btn" id="setup">Einrichtung</button>
           <button class="btn" id="reload" title="Gespeicherten Stand neu laden">↻</button>
           <button class="btn primary" id="save" disabled>Speichern</button>
@@ -169,6 +170,7 @@ class DisplayCard extends HTMLElement {
     $("save").addEventListener("click", () => this._save());
     $("reload").addEventListener("click", () => this._reload());
     $("setup").addEventListener("click", () => this._toggleSetup());
+    $("fwbtn").addEventListener("click", () => this._updateFirmware());
     this.shadowRoot.querySelectorAll(".pi").forEach((el) => {
       el.addEventListener("dragstart", (e) => e.dataTransfer.setData("text/plain", el.dataset.type));
       el.addEventListener("click", () => this._add(el.dataset.type, 20, 20, true));
@@ -281,8 +283,46 @@ class DisplayCard extends HTMLElement {
     const dev = this._devices.find((d) => d.id === this._deviceId);
     const dot = this.shadowRoot.getElementById("dot");
     if (!dev || !dot) return;
-    const sensor = Object.values(this._hass.states).find((s) => s.attributes.device_class === "connectivity" && s.entity_id.endsWith("_connected") && s.attributes.friendly_name?.startsWith(dev.name));
-    dot.classList.toggle("on", sensor ? sensor.state === "on" : dev.online);
+    // The entity id depends on the language Home Assistant ran in when the display was added (…_connected, …_verbunden).
+    const sensor = dev.connected_entity ? this._hass.states[dev.connected_entity] : null;
+    this._online = sensor ? sensor.state === "on" : dev.online;
+    dot.classList.toggle("on", this._online);
+    this._refreshFirmware();
+  }
+
+  // ── Firmware (over the air, through the integration's update entity) ──────
+
+  _refreshFirmware() {
+    const text = this.shadowRoot.getElementById("fw");
+    const button = this.shadowRoot.getElementById("fwbtn");
+    if (!text || !button) return;
+    const dev = this._devices.find((d) => d.id === this._deviceId);
+    const state = dev?.update_entity ? this._hass.states[dev.update_entity] : null;
+    if (!state) { text.textContent = ""; button.hidden = true; return; }
+    const a = state.attributes;
+    let label, available = false;
+    if (a.in_progress) label = `Update läuft … ${a.update_percentage ?? 0} %`;
+    else if (!a.installed_version) label = this._online ? "Firmware älter als 0.3.0: einmal per Kabel flashen" : "Firmware unbekannt (Display nicht verbunden)";
+    else if (state.state === "on") { label = `Firmware ${a.installed_version} → ${a.latest_version} verfügbar`; available = true; }
+    else label = `Firmware ${a.installed_version}`;
+    text.textContent = label;
+    button.hidden = !available && !a.in_progress;
+    button.disabled = !!a.in_progress || !this._online;
+    button.title = this._online ? "" : "Das Display muss eingeschaltet und verbunden sein";
+  }
+
+  async _updateFirmware() {
+    const dev = this._devices.find((d) => d.id === this._deviceId);
+    const a = this._hass.states[dev?.update_entity]?.attributes;
+    if (!a || !confirm(`Firmware von „${dev.name}“ auf ${a.latest_version} aktualisieren?\n\nDas Display lädt die neue Firmware und startet danach neu. In dieser Zeit nicht ausschalten.`)) return;
+    this._message("Update gestartet …");
+    try {
+      await this._hass.callService("update", "install", { entity_id: dev.update_entity });
+      this._message("Firmware aktualisiert.");
+      setTimeout(() => this._message(""), 4000);
+    } catch (err) {
+      this._message(`Update fehlgeschlagen: ${err.message || err.code}`, true);
+    }
   }
 
   // ── Panel setup info (address + this display's own device code) ───────────

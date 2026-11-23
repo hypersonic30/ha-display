@@ -14,11 +14,12 @@ from homeassistant.helpers.typing import ConfigType
 from . import websocket_api
 from .const import CARD_FILE, CONF_DEVICE_KEY, DOMAIN, STATIC_PATH
 from .devices import device_subentries, rotation_of, screen_size
+from .firmware import DisplayFirmwareView, async_load_bundle
 from .layouts import LayoutStore
 from .panel import CLOSE_GONE, DisplayPingView, DisplaySocketView
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
-PLATFORMS = ["binary_sensor"]
+PLATFORMS = ["binary_sensor", "update"]
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -31,10 +32,11 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
     store = LayoutStore(hass)
     await store.async_load()
-    hass.data[DOMAIN] = {"store": store, "sessions": set()}
+    hass.data[DOMAIN] = {"store": store, "sessions": set(), "firmware": await async_load_bundle(hass)}
     websocket_api.async_register(hass)
     hass.http.register_view(DisplaySocketView(hass))
     hass.http.register_view(DisplayPingView())
+    hass.http.register_view(DisplayFirmwareView(hass))
 
     async def close_panels(_: Event) -> None:
         for session in list(hass.data[DOMAIN]["sessions"]):

@@ -1,3 +1,5 @@
+import hashlib
+import json
 from datetime import timedelta
 
 import pytest
@@ -16,8 +18,26 @@ def auto_enable_custom_integrations(enable_custom_integrations):
     yield
 
 
+FW_LATEST = "9.9.9"
+
+
+@pytest.fixture
+def fake_firmware(tmp_path, monkeypatch):
+    """A tiny firmware bundle (two variants) instead of the real images."""
+    from custom_components.display import firmware  # noqa: PLC0415
+
+    files = {"ili9488": b"\x01" * 1500, "ili9481": b"\x02" * 1600}
+    variants = {}
+    for name, data in files.items():
+        (tmp_path / f"firmware-{name}.bin").write_bytes(data)
+        variants[name] = {"file": f"firmware-{name}.bin", "size": len(data), "md5": hashlib.md5(data).hexdigest(), "sha256": hashlib.sha256(data).hexdigest()}
+    (tmp_path / "manifest.json").write_text(json.dumps({"version": FW_LATEST, "variants": variants}))
+    monkeypatch.setattr(firmware, "FIRMWARE_DIR", tmp_path)
+    return {"files": files, "variants": variants}
+
+
 @pytest.fixture(autouse=True)
-async def integration_first(hass, auto_enable_custom_integrations):
+async def integration_first(hass, auto_enable_custom_integrations, fake_firmware):
     """Set the integration (and its frontend dependency) up before any test client freezes the HTTP router.
 
     Home Assistant lifts that freeze at runtime; the test server does not, so registering the card's static path

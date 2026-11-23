@@ -11,7 +11,11 @@ static const lv_color_t C_ERR    = LV_COLOR_MAKE(0xef, 0x53, 0x50);
 
 static const char *HOLD_HINT = "Touch 3 s halten: Setup";
 
+static lv_obj_t *update_bar = nullptr;
+static lv_obj_t *update_pct = nullptr;
+
 static void clear_screen() {
+    update_bar = update_pct = nullptr;   // the update screen's objects are about to be deleted
     lv_obj_t *scr = lv_scr_act();
     lv_obj_clean(scr);
     widgets_reset();  // the layout objects are gone now
@@ -139,4 +143,43 @@ void ui_show_running(const char *ha_url) {
     lv_obj_t *placeholder = wrap_label(scr, "Warte auf Layout ...", &ui_font_16, C_MUTED, scr_w() - 40);
     lv_obj_align(placeholder, LV_ALIGN_CENTER, 0, 20);
     add_hold_hint(scr);
+}
+
+// ── Firmware update screen ────────────────────────────────────────────────────
+
+void ui_show_update(const char *version) {
+    clear_screen();
+    lv_obj_t *scr = lv_scr_act();
+    const int W = scr_w();
+
+    lv_obj_t *title = make_label(scr, "Firmware-Update", &ui_font_24, C_ACCENT);
+    lv_obj_align(title, LV_ALIGN_CENTER, 0, -60);
+
+    char line[48];
+    snprintf(line, sizeof(line), "Version %s", version && version[0] ? version : "?");
+    lv_obj_t *sub = wrap_label(scr, line, &ui_font_14, C_MUTED, W - 40);
+    lv_obj_align(sub, LV_ALIGN_CENTER, 0, -30);
+
+    update_bar = lv_bar_create(scr);
+    lv_obj_set_size(update_bar, W - 60 < 360 ? W - 60 : 360, 16);
+    lv_obj_align(update_bar, LV_ALIGN_CENTER, 0, 10);
+    lv_bar_set_range(update_bar, 0, 100);
+    lv_bar_set_value(update_bar, 0, LV_ANIM_OFF);
+    lv_obj_set_style_bg_color(update_bar, C_CARD, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(update_bar, C_ACCENT, LV_PART_INDICATOR);
+
+    update_pct = make_label(scr, "0 %", &ui_font_20, C_WHITE);
+    lv_obj_align(update_pct, LV_ALIGN_CENTER, 0, 44);
+
+    lv_obj_t *hint = wrap_label(scr, "Bitte nicht ausschalten", &ui_font_14, C_MUTED, W - 40);
+    lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -14);
+}
+
+void ui_update_progress(int percent) {
+    if (!update_bar || !update_pct) return;
+    percent = percent < 0 ? 0 : percent > 100 ? 100 : percent;
+    lv_bar_set_value(update_bar, percent, LV_ANIM_OFF);
+    char text[12];
+    snprintf(text, sizeof(text), "%d %%", percent);
+    lv_label_set_text(update_pct, text);
 }

@@ -82,6 +82,11 @@
       "connected": {
         "name": "Connected"
       }
+    },
+    "update": {
+      "firmware": {
+        "name": "Firmware"
+      }
     }
   },
   "selector": {

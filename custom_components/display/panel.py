@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from typing import Any
 
@@ -28,6 +29,13 @@ MAX_STATE_BYTES = 47          # the firmware keeps a state in a 48 byte buffer
 MIN_ACTION_GAP = 0.1          # seconds between taps of one panel
 CLOSE_AUTH = 4001
 CLOSE_GONE = 4002
+_TEXT = re.compile(r"[^0-9A-Za-z._+ -]")
+OTA_STATES = ("downloading", "done", "error")
+
+
+def _clean(value: Any, limit: int) -> str:
+    """Text from a panel: short, plain characters only (it ends up in the UI and in logs)."""
+    return _TEXT.sub("", value)[:limit] if isinstance(value, str) else ""
 
 
 def _short(state: str) -> str:
@@ -54,11 +62,13 @@ def _service_for(widget: dict, msg: dict) -> tuple[str, str] | None:
 class PanelSession:
     """One connected, authenticated panel."""
 
-    def __init__(self, hass: HomeAssistant, ws: web.WebSocketResponse, device_id: str, key: str) -> None:
+    def __init__(self, hass: HomeAssistant, ws: web.WebSocketResponse, device_id: str, key: str, fw: str = "", variant: str = "") -> None:
         self.hass = hass
         self.ws = ws
         self.device_id = device_id
         self.key = key
+        self.fw = fw
+        self.variant = variant
         self._store = hass.data[DOMAIN]["store"]
         self._lock = asyncio.Lock()
         self._widgets: list[dict] = []
@@ -137,7 +147,23 @@ class PanelSession:
         self._page = (self._page + (1 if direction == "next" else -1)) % count
         await self.send_layout()
 
+    async def start_ota(self, version: str, info: dict) -> None:
+        await self._send(
+            {"type": "ota", "version": version, "path": f"/api/display/firmware/{self.variant}", "size": info["size"], "md5": info["md5"]}
+        )
+
+    def _ota_status(self, msg: dict) -> None:
+        state = msg.get("state")
+        progress = msg.get("progress")
+        if state not in OTA_STATES:
+            return
+        progress = max(0, min(100, progress)) if isinstance(progress, int) and not isinstance(progress, bool) else 0
+        self._store.ota_status(self.device_id, state, progress, _clean(msg.get("error"), 80))
+
     async def handle(self, msg: dict) -> None:
+        if msg.get("type") == "ota_status":
+            self._ota_status(msg)
+            return
         if msg.get("type") == "page":
             await self._switch_page(msg.get("dir"))
             return
@@ -179,6 +205,7 @@ class DisplaySocketView(HomeAssistantView):
         sessions.add(session)
         remove_listener = store.add_listener(session.device_id, session.layout_changed)
         store.mark_online(session.device_id, token)
+        store.set_info(session.device_id, session.fw, session.variant)
         try:
             await session.send_layout()
             async for raw in ws:
@@ -213,7 +240,7 @@ class DisplaySocketView(HomeAssistantView):
             await ws.send_json({"type": "error", "code": "auth"})
             await ws.close(code=CLOSE_AUTH)
             return None
-        return PanelSession(self.hass, ws, sub.subentry_id, key)
+        return PanelSession(self.hass, ws, sub.subentry_id, key, _clean(hello.get("fw"), 32), _clean(hello.get("variant"), 16))
 
 
 class DisplayPingView(HomeAssistantView):

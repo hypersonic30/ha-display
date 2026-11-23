@@ -7,7 +7,10 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 
 from .const import CONF_DEVICE_KEY, CONF_HA_URL, DOMAIN
+from homeassistant.helpers import entity_registry as er
+
 from .devices import brightness_of, device_subentries, get_entry, rotation_of, screen_size
+from .firmware import bundle_of
 from .layouts import LayoutStore, validate_layout
 
 
@@ -53,10 +56,23 @@ def async_register(hass: HomeAssistant) -> None:
 def ws_devices(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
     entry = get_entry(hass)
     store = _store(hass)
-    devices = [
-        {"id": sub.subentry_id, "name": sub.title, "online": store.is_online(sub.subentry_id)}
-        for sub in (device_subentries(entry) if entry else [])
-    ]
+    registry = er.async_get(hass)
+    bundle = bundle_of(hass)
+    devices = []
+    for sub in device_subentries(entry) if entry else []:
+        info = store.info(sub.subentry_id)
+        devices.append(
+            {
+                "id": sub.subentry_id,
+                "name": sub.title,
+                "online": store.is_online(sub.subentry_id),
+                "fw": info["fw"],
+                "variant": info["variant"],
+                "fw_latest": bundle["version"] if bundle else None,
+                "update_entity": registry.async_get_entity_id("update", DOMAIN, f"{sub.subentry_id}_firmware"),
+                "connected_entity": registry.async_get_entity_id("binary_sensor", DOMAIN, f"{sub.subentry_id}_connected"),
+            }
+        )
     connection.send_result(msg["id"], {"devices": sorted(devices, key=lambda d: d["name"].lower())})
 
 

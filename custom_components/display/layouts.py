@@ -1,6 +1,7 @@
 """Layout storage, validation and live push to the panels."""
 from __future__ import annotations
 
+import asyncio
 import re
 from collections.abc import Callable
 from typing import Any
@@ -8,6 +9,7 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.storage import Store
 
@@ -33,6 +35,22 @@ MIN_PAGER_H = 24
 
 def online_signal(subentry_id: str) -> str:
     return f"{DOMAIN}_online_{subentry_id}"
+
+
+def info_signal(subentry_id: str) -> str:
+    """Firmware version, variant or update progress of a panel changed."""
+    return f"{DOMAIN}_info_{subentry_id}"
+
+
+class OtaRun:
+    """One running firmware update of one panel."""
+
+    def __init__(self, target: str, future: asyncio.Future) -> None:
+        self.target = target
+        self.future = future
+        self.state = "starting"
+        self.progress = 0
+        self.done_seen = False
 
 
 def empty_layout() -> dict:
@@ -177,6 +195,8 @@ class LayoutStore:
         self._data: dict[str, dict] = {}
         self._listeners: dict[str, list[Callable[[], None]]] = {}
         self._online: dict[str, set[object]] = {}
+        self._info: dict[str, dict] = {}
+        self._ota: dict[str, OtaRun] = {}
 
     async def async_load(self) -> None:
         self._data = await self._store.async_load() or {}
@@ -261,3 +281,53 @@ class LayoutStore:
     def mark_offline(self, device_id: str, token: object) -> None:
         self._online.get(device_id, set()).discard(token)
         async_dispatcher_send(self._hass, online_signal(device_id))
+
+    # ── what the panel runs, and firmware updates ────────────────────────────
+
+    def info(self, device_id: str) -> dict:
+        return self._info.get(device_id) or {"fw": None, "variant": None}
+
+    @callback
+    def set_info(self, device_id: str, fw: str | None, variant: str | None) -> None:
+        """Called on every hello. A hello with the target version completes a running update."""
+        self._info[device_id] = {"fw": fw or None, "variant": variant or None}
+        run = self._ota.get(device_id)
+        if run and not run.future.done():
+            if fw == run.target:
+                run.future.set_result(None)
+            elif run.done_seen:
+                run.future.set_exception(
+                    HomeAssistantError("The display restarted but still runs the old firmware (it fell back after the update)")
+                )
+        async_dispatcher_send(self._hass, info_signal(device_id))
+
+    def ota(self, device_id: str) -> OtaRun | None:
+        return self._ota.get(device_id)
+
+    @callback
+    def ota_begin(self, device_id: str, target: str) -> asyncio.Future:
+        if (run := self._ota.get(device_id)) and not run.future.done():
+            raise HomeAssistantError("A firmware update of this display is already running")
+        run = OtaRun(target, self._hass.loop.create_future())
+        run.future.add_done_callback(lambda f: f.cancelled() or f.exception())  # never "exception was never retrieved"
+        self._ota[device_id] = run
+        async_dispatcher_send(self._hass, info_signal(device_id))
+        return run.future
+
+    @callback
+    def ota_status(self, device_id: str, state: str, progress: int, error: str) -> None:
+        run = self._ota.get(device_id)
+        if run is None or run.future.done():
+            return
+        run.state = state
+        run.progress = progress
+        if state == "done":
+            run.done_seen = True
+        elif state == "error":
+            run.future.set_exception(HomeAssistantError(error or "The display reported an update error"))
+        async_dispatcher_send(self._hass, info_signal(device_id))
+
+    @callback
+    def ota_end(self, device_id: str) -> None:
+        self._ota.pop(device_id, None)
+        async_dispatcher_send(self._hass, info_signal(device_id))
