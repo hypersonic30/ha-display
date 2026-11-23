@@ -1,44 +1,44 @@
 #include <Arduino.h>
 #include <WiFi.h>
+#include <HTTPClient.h>
 #include <TFT_eSPI.h>
 #include <lvgl.h>
-#include "secrets.h"
 
-// ── Display ──────────────────────────────────────────────────────────────────
+#include "storage.h"
+#include "provisioning.h"
+#include "ui.h"
+
+// ── Display & LVGL ────────────────────────────────────────────────────────────
 
 TFT_eSPI tft = TFT_eSPI();
-
 static lv_disp_draw_buf_t draw_buf;
-static lv_color_t buf[LV_HOR_RES_MAX * 10];
+static lv_color_t         buf[LV_HOR_RES_MAX * 10];
 
 static void disp_flush(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *color_p) {
-    uint32_t w = area->x2 - area->x1 + 1;
-    uint32_t h = area->y2 - area->y1 + 1;
     tft.startWrite();
-    tft.setAddrWindow(area->x1, area->y1, w, h);
-    tft.pushColors((uint16_t *)&color_p->full, w * h, true);
+    tft.setAddrWindow(area->x1, area->y1,
+                      area->x2 - area->x1 + 1,
+                      area->y2 - area->y1 + 1);
+    tft.pushColors((uint16_t *)&color_p->full,
+                   (area->x2 - area->x1 + 1) * (area->y2 - area->y1 + 1), true);
     tft.endWrite();
     lv_disp_flush_ready(drv);
 }
 
 static void touch_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {
     uint16_t x, y;
-    if (tft.getTouch(&x, &y)) {
-        data->state   = LV_INDEV_STATE_PRESSED;
-        data->point.x = x;
-        data->point.y = y;
-    } else {
-        data->state = LV_INDEV_STATE_RELEASED;
-    }
+    data->state = tft.getTouch(&x, &y) ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
+    data->point.x = x;
+    data->point.y = y;
 }
 
 static void display_init() {
     tft.begin();
-    tft.setRotation(1);  // landscape
+    tft.setRotation(1);
     tft.fillScreen(TFT_BLACK);
     ledcSetup(0, 5000, 8);
     ledcAttachPin(TFT_BL, 0);
-    ledcWrite(0, 220);  // backlight ~86 %
+    ledcWrite(0, 220);
 
     lv_init();
     lv_disp_draw_buf_init(&draw_buf, buf, NULL, LV_HOR_RES_MAX * 10);
@@ -58,64 +58,136 @@ static void display_init() {
     lv_indev_drv_register(&indev_drv);
 }
 
-// ── UI helpers ────────────────────────────────────────────────────────────────
+// ── AP SSID ───────────────────────────────────────────────────────────────────
 
-static lv_obj_t *status_label;
+static char ap_ssid[32];
 
-static void ui_boot_screen() {
-    lv_obj_t *scr = lv_scr_act();
-    lv_obj_set_style_bg_color(scr, lv_color_hex(0x1a1a2e), LV_PART_MAIN);
-
-    lv_obj_t *title = lv_label_create(scr);
-    lv_label_set_text(title, "ESP32 Display");
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, LV_PART_MAIN);
-    lv_obj_set_style_text_color(title, lv_color_hex(0x4fc3f7), LV_PART_MAIN);
-    lv_obj_align(title, LV_ALIGN_CENTER, 0, -40);
-
-    status_label = lv_label_create(scr);
-    lv_label_set_text(status_label, "Verbinde mit WLAN...");
-    lv_obj_set_style_text_color(status_label, lv_color_hex(0xaaaaaa), LV_PART_MAIN);
-    lv_obj_align(status_label, LV_ALIGN_CENTER, 0, 10);
-
-    lv_obj_t *spinner = lv_spinner_create(scr, 1000, 60);
-    lv_obj_set_size(spinner, 40, 40);
-    lv_obj_align(spinner, LV_ALIGN_CENTER, 0, 60);
+static void build_ap_ssid() {
+    uint8_t mac[6];
+    WiFi.macAddress(mac);
+    snprintf(ap_ssid, sizeof(ap_ssid), "ESP32-Display-%02X%02X", mac[4], mac[5]);
 }
 
-static void set_status(const char *msg) {
-    if (status_label) lv_label_set_text(status_label, msg);
-    lv_task_handler();
+// ── HA connection test ────────────────────────────────────────────────────────
+
+static bool ha_reachable(const Config &cfg) {
+    char url[160];
+    snprintf(url, sizeof(url), "%s/api/", cfg.ha_url);
+    char auth[540];
+    snprintf(auth, sizeof(auth), "Bearer %s", cfg.ha_token);
+
+    HTTPClient http;
+    http.begin(url);
+    http.addHeader("Authorization", auth);
+    int code = http.GET();
+    http.end();
+    Serial.printf("[HA] GET %s → %d\n", url, code);
+    return code == 200 || code == 201;
 }
 
-// ── Setup / Loop ──────────────────────────────────────────────────────────────
+// ── State machine ─────────────────────────────────────────────────────────────
+
+enum State { PROVISIONING, CONNECTING_WIFI, TESTING_HA, RUNNING };
+static State  state;
+static Config cfg;
+static uint32_t connect_start;
+static uint8_t  wifi_retries;
+
+static void enter_provisioning() {
+    state = PROVISIONING;
+    build_ap_ssid();
+    provisioning_begin(ap_ssid);
+    ui_show_provisioning(ap_ssid, "192.168.4.1");
+    Serial.printf("[STATE] → PROVISIONING  SSID: %s\n", ap_ssid);
+}
+
+static void enter_connecting_wifi() {
+    state = CONNECTING_WIFI;
+    provisioning_end();
+    WiFi.begin(cfg.wifi_ssid, cfg.wifi_pass);
+    connect_start = millis();
+    wifi_retries  = 0;
+    ui_show_connecting("Verbinde mit WLAN...");
+    Serial.printf("[STATE] → CONNECTING_WIFI  SSID: %s\n", cfg.wifi_ssid);
+}
+
+static void enter_testing_ha() {
+    state = TESTING_HA;
+    ui_show_connecting("Prüfe Home Assistant...");
+    Serial.printf("[STATE] → TESTING_HA  %s\n", cfg.ha_url);
+}
+
+static void enter_running() {
+    state = RUNNING;
+    storage_save(cfg);
+    ui_show_running(cfg.device_name, cfg.ha_url);
+    Serial.println("[STATE] → RUNNING");
+    // TODO: start HA WebSocket connection
+}
+
+static void enter_error(const char *msg, bool clear_storage = false) {
+    if (clear_storage) storage_clear();
+    ui_show_error(msg);
+    Serial.printf("[ERROR] %s\n", msg);
+    delay(4000);
+    ESP.restart();
+}
+
+// ── Setup ─────────────────────────────────────────────────────────────────────
 
 void setup() {
     Serial.begin(115200);
     display_init();
-    ui_boot_screen();
-    lv_task_handler();
+    ui_init();
+    build_ap_ssid();
 
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-    Serial.print("WiFi connecting");
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
-        Serial.print(".");
-        lv_task_handler();
+    if (storage_load(cfg)) {
+        Serial.printf("[BOOT] Credentials found, connecting to %s\n", cfg.wifi_ssid);
+        enter_connecting_wifi();
+    } else {
+        Serial.println("[BOOT] No credentials, starting provisioning");
+        enter_provisioning();
     }
-    Serial.println();
-    Serial.print("IP: ");
-    Serial.println(WiFi.localIP());
-
-    char msg[64];
-    snprintf(msg, sizeof(msg), "IP: %s", WiFi.localIP().toString().c_str());
-    set_status(msg);
-
-    // TODO: connect to HA WebSocket
-    // TODO: receive layout JSON from HA
-    // TODO: render widgets based on layout
 }
+
+// ── Loop ──────────────────────────────────────────────────────────────────────
 
 void loop() {
     lv_task_handler();
+
+    switch (state) {
+
+    case PROVISIONING:
+        provisioning_handle();
+        if (provisioning_done()) {
+            cfg = provisioning_config();
+            enter_connecting_wifi();
+        }
+        break;
+
+    case CONNECTING_WIFI:
+        if (WiFi.status() == WL_CONNECTED) {
+            Serial.printf("[WIFI] Connected, IP: %s\n", WiFi.localIP().toString().c_str());
+            enter_testing_ha();
+        } else if (millis() - connect_start > 20000) {
+            // Timeout — back to provisioning (don't clear storage, let user correct)
+            WiFi.disconnect();
+            enter_error("WLAN-Verbindung fehlgeschlagen.\nZurück zur Einrichtung.", true);
+        }
+        break;
+
+    case TESTING_HA:
+        if (ha_reachable(cfg)) {
+            enter_running();
+        } else {
+            enter_error("Home Assistant nicht erreichbar.\nURL oder Token prüfen.", true);
+        }
+        break;
+
+    case RUNNING:
+        // TODO: lv_task_handler already called above; HA WebSocket tick goes here
+        break;
+    }
+
     delay(5);
 }
