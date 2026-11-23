@@ -1,7 +1,7 @@
 // ESP32 Display card: visual layout editor for the panels set up in the "ESP32 Display" integration.
 // Talks to Home Assistant only through the integration's WebSocket commands (display/...).
 
-const CARD_VERSION = "0.2.0";
+const CARD_VERSION = "0.2.1";
 const SCREEN_W = 480, SCREEN_H = 320, GRID = 5, MAX_WIDGETS = 32, MIN_SIZE = 20;
 
 const TYPES = {
