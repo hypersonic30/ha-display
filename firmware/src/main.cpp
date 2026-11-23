@@ -7,6 +7,7 @@
 #include "storage.h"
 #include "provisioning.h"
 #include "ui.h"
+#include "ha_client.h"
 
 // ── Display & LVGL ────────────────────────────────────────────────────────────
 
@@ -36,9 +37,8 @@ static void display_init() {
     tft.begin();
     tft.setRotation(1);
     tft.fillScreen(TFT_BLACK);
-    ledcSetup(0, 5000, 8);
-    ledcAttachPin(TFT_BL, 0);
-    ledcWrite(0, 220);
+    ledcAttach(TFT_BL, 5000, 8);
+    ledcWrite(TFT_BL, 220);
 
     lv_init();
     lv_disp_draw_buf_init(&draw_buf, buf, NULL, LV_HOR_RES_MAX * 10);
@@ -117,12 +117,41 @@ static void enter_testing_ha() {
     Serial.printf("[STATE] → TESTING_HA  %s\n", cfg.ha_url);
 }
 
+// ── Entity state callback ─────────────────────────────────────────────────────
+
+static void on_entity_state(const char *entity_id, const char *state_val,
+                             JsonObjectConst attributes) {
+    Serial.printf("[STATE] %s = %s\n", entity_id, state_val);
+    // TODO: find widget for entity_id, update LVGL label/gauge/etc.
+}
+
+// ── Layout callback ───────────────────────────────────────────────────────────
+
+static void on_layout(JsonArrayConst widgets) {
+    // Collect entity IDs to subscribe to
+    static const char *entity_ids[32];
+    static char        entity_buf[32][64];
+    size_t count = 0;
+
+    for (JsonObjectConst w : widgets) {
+        const char *eid = w["entity"] | "";
+        if (eid[0] && count < 32) {
+            strlcpy(entity_buf[count], eid, 64);
+            entity_ids[count] = entity_buf[count];
+            count++;
+        }
+    }
+    if (count) ha_client_subscribe(entity_ids, count);
+
+    // TODO: render initial widget layout on display
+}
+
 static void enter_running() {
     state = RUNNING;
     storage_save(cfg);
     ui_show_running(cfg.device_name, cfg.ha_url);
+    ha_client_begin(cfg, on_entity_state, on_layout);
     Serial.println("[STATE] → RUNNING");
-    // TODO: start HA WebSocket connection
 }
 
 static void enter_error(const char *msg, bool clear_storage = false) {
@@ -185,7 +214,7 @@ void loop() {
         break;
 
     case RUNNING:
-        // TODO: lv_task_handler already called above; HA WebSocket tick goes here
+        ha_client_tick();
         break;
     }
 
