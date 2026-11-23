@@ -70,10 +70,8 @@ button[type=submit]:disabled{opacity:.5;cursor:not-allowed}
     <h2>Home Assistant</h2>
     <label>URL</label>
     <input name="ha_url" type="text" placeholder="http://192.168.x.x:8123" required>
-    <label>Long-Lived Access Token</label>
-    <input name="ha_token" type="password" placeholder="eyJ..." required autocomplete="off">
-    <label>Gerätename</label>
-    <input name="device_name" placeholder="z.B. Küche – muss in HA angelegt sein" required>
+    <label>Gerätecode</label>
+    <input name="device_key" type="text" placeholder="wird in Home Assistant unter &#39;Einrichtung&#39; angezeigt" required autocomplete="off" autocapitalize="off" spellcheck="false">
   </div>
 
   <button type="submit" id="btn">Verbinden &amp; Speichern</button>
@@ -101,7 +99,7 @@ document.getElementById('frm').addEventListener('submit',async e=>{
   btn.disabled=true;
   status('<span class="spinner"></span>Speichere und starte neu...','info');
   const data=Object.fromEntries(new FormData(e.target));
-  for(const k of ['ha_url','ha_token','device_name'])data[k]=data[k].trim();
+  for(const k of ['ha_url','device_key'])data[k]=data[k].trim();
   data.ha_url=data.ha_url.replace(/\/+$/,'');
   try{
     const r=await fetch('/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
@@ -118,6 +116,13 @@ document.getElementById('frm').addEventListener('submit',async e=>{
   }
 });
 
+(function(){
+  const q=new URLSearchParams(location.search);
+  for(const [param,field] of [['url','ha_url'],['key','device_key']]){
+    const v=q.get(param);
+    if(v)document.querySelector('[name='+field+']').value=v;
+  }
+})();
 scan();
 </script>
 </body>
@@ -158,12 +163,21 @@ static void handle_save() {
     const char *ssid  = doc["ssid"]     | "";
     const char *pass  = doc["password"] | "";
     String ha_url = trimmed(doc["ha_url"]      | "");
-    String token  = trimmed(doc["ha_token"]    | "");
-    String name   = trimmed(doc["device_name"] | "");
+    String key    = trimmed(doc["device_key"]  | "");
     while (ha_url.endsWith("/")) ha_url.remove(ha_url.length() - 1);
 
-    if (!ssid[0] || !ha_url.length() || !token.length() || !name.length()) {
+    if (!ssid[0] || !ha_url.length() || !key.length()) {
         server.send(400, "application/json", "{\"ok\":false,\"error\":\"Felder fehlen\"}");
+        return;
+    }
+    bool key_ok = key.length() < sizeof(saved_cfg.device_key);
+    for (size_t i = 0; key_ok && i < key.length(); i++) {
+        char c = key[i];
+        key_ok = isalnum((unsigned char)c) || c == '_' || c == '-';
+    }
+    if (!key_ok) {
+        server.send(400, "application/json",
+                    "{\"ok\":false,\"error\":\"Gerätecode ungültig (nur Buchstaben, Ziffern, _ und -)\"}");
         return;
     }
     if (!ha_url.startsWith("http://") && !ha_url.startsWith("https://")) {
@@ -175,8 +189,7 @@ static void handle_save() {
     strlcpy(saved_cfg.wifi_ssid,   ssid,   sizeof(saved_cfg.wifi_ssid));
     strlcpy(saved_cfg.wifi_pass,   pass,   sizeof(saved_cfg.wifi_pass));
     strlcpy(saved_cfg.ha_url,      ha_url.c_str(), sizeof(saved_cfg.ha_url));
-    strlcpy(saved_cfg.ha_token,    token.c_str(),  sizeof(saved_cfg.ha_token));
-    strlcpy(saved_cfg.device_name, name.c_str(),   sizeof(saved_cfg.device_name));
+    strlcpy(saved_cfg.device_key,  key.c_str(),    sizeof(saved_cfg.device_key));
     cfg_ready = true;
 
     server.send(200, "application/json", "{\"ok\":true}");

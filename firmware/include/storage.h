@@ -5,8 +5,7 @@ struct Config {
     char wifi_ssid[64];
     char wifi_pass[64];
     char ha_url[128];
-    char ha_token[512];
-    char device_name[64];
+    char device_key[64];   // per-display code issued by the integration
 };
 
 bool  storage_load(Config &cfg);

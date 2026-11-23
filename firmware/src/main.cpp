@@ -139,6 +139,7 @@ static uint32_t connect_start;
 static bool     wifi_fail_shown;
 static uint32_t next_ha_try;
 static bool     ha_fail_shown;
+static bool     ha_missing;
 static HaStatus last_ha_status;
 
 static bool    status_screen = false;  // a screen without widgets: hold touch -> setup
@@ -185,6 +186,7 @@ static void enter_connecting_wifi() {
 static void enter_testing_ha() {
     state = TESTING_HA;
     ha_fail_shown = false;
+    ha_missing = false;
     next_ha_try = 0;
     screen_connecting("Prüfe Home Assistant...");
     Serial.printf("[STATE] -> TESTING_HA  %s\n", cfg.ha_url);
@@ -203,26 +205,10 @@ static void on_layout(JsonObjectConst ev) {
     JsonArrayConst widgets = ev["widgets"].as<JsonArrayConst>();
     int32_t rev = ev["rev"] | 0;
     if (rev != built_rev) {
-        int n = widgets_build(widgets, ev["name"] | cfg.device_name);
+        int n = widgets_build(widgets, ev["name"] | "Display");
         built_rev = rev;
         status_screen = (n == 0);
     }
-
-    // The subscription must be renewed after every (re)connect, even for an unchanged layout.
-    static const char *entity_ids[32];
-    static char        entity_buf[32][64];
-    size_t count = 0;
-    for (JsonObjectConst w : widgets) {
-        const char *eid = w["entity"] | "";
-        if (!eid[0] || count >= 32) continue;
-        bool dup = false;
-        for (size_t i = 0; i < count; i++) dup |= strcmp(entity_buf[i], eid) == 0;
-        if (dup) continue;
-        strlcpy(entity_buf[count], eid, sizeof(entity_buf[0]));
-        entity_ids[count] = entity_buf[count];
-        count++;
-    }
-    ha_client_subscribe(entity_ids, count);
 }
 
 static void enter_running() {
@@ -230,7 +216,7 @@ static void enter_running() {
     status_screen = true;
     built_rev = -1;
     last_ha_status = HA_CONNECTING;
-    ui_show_running(cfg.device_name, cfg.ha_url);
+    ui_show_running(cfg.ha_url);
     ha_client_begin(cfg, on_entity_state, on_layout);
     Serial.println("[STATE] -> RUNNING");
 }
@@ -243,13 +229,7 @@ static void check_ha_status() {
     char msg[160];
     switch (st) {
     case HA_AUTH_FAILED:
-        screen_error("Token ungültig.\nIn Home Assistant einen neuen Langzeit-Zugriffstoken erstellen.");
-        break;
-    case HA_DEVICE_UNKNOWN:
-        snprintf(msg, sizeof(msg), "Gerät '%s' ist in Home Assistant nicht angelegt.\n"
-                 "Unter der Integration 'ESP32 Display' ein Gerät mit diesem Namen hinzufügen.",
-                 cfg.device_name);
-        screen_error(msg);
+        screen_error("Gerätecode ungültig / abgelehnt.\nIn Home Assistant unter 'Einrichtung' prüfen.");
         break;
     case HA_PROTOCOL_ERROR:
         snprintf(msg, sizeof(msg), "Home Assistant lehnt die Verbindung ab:\n%s", ha_client_error());
@@ -326,15 +306,15 @@ void loop() {
             int code = ha_check(cfg);
             if (code == 200 || code == 201) {
                 enter_running();
-            } else if (code == 401 || code == 403) {
-                // No retries: a wrong token must not hammer HA (IP ban)
-                next_ha_try = UINT32_MAX;
-                screen_error(code == 401 ? "Token ungültig.\nIn Home Assistant einen neuen Langzeit-Zugriffstoken erstellen."
-                                         : "Home Assistant verweigert den Zugriff (IP gesperrt?).");
             } else {
-                if (!ha_fail_shown) {
-                    screen_error("Home Assistant nicht erreichbar.\nURL prüfen. Neuer Versuch läuft...");
+                // 404 = reachable but no integration there; anything else = not reachable
+                bool missing = (code == 404);
+                if (!ha_fail_shown || missing != ha_missing) {
+                    screen_error(missing
+                        ? "Integration 'ESP32 Display' nicht gefunden.\nURL prüfen. Neuer Versuch läuft..."
+                        : "Home Assistant nicht erreichbar.\nURL prüfen. Neuer Versuch läuft...");
                     ha_fail_shown = true;
+                    ha_missing = missing;
                 }
                 next_ha_try = millis() + 10000;
             }

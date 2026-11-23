@@ -77,7 +77,7 @@ def mount(pg, stub, config=None, states=STATES):
         "display/devices": () => stub.devices,
         "display/layout/get": (m) => ({ name: "x", rev: 1, widgets: store[m.device_id] || [], settings: { brightness: 80 } }),
         "display/layout/set": (m) => { if (stub.saveError) throw { code: "invalid_format", message: stub.saveError }; store[m.device_id] = m.widgets; return { rev: 2, widgets: m.widgets }; },
-        "display/setup_info": (m) => { if (stub.notAdmin) throw { code: "unauthorized", message: "Unauthorized" }; return { name: "Küche", ha_url: "http://ha:8123", token: "SECRET-TOKEN" }; },
+        "display/setup_info": (m) => { if (stub.notAdmin) throw { code: "unauthorized", message: "Unauthorized" }; return { name: "Küche", ha_url: "http://ha:8123", device_key: "SECRET-KEY_1" }; },
       };
       window.mount(config, states);
     }""", [stub, config or {}, states])
@@ -177,9 +177,13 @@ with sync_playwright() as p:
     # ── setup info (the one token) ─────────────────────────────────────────────
     mount(pg, stub())
     pg.click("display-card >> #setup"); pg.wait_for_timeout(200)
-    check("setup box shows name, URL and a masked token", sh(pg, "r.getElementById('si1').value") == "http://ha:8123" and sh(pg, "r.getElementById('si2').type") == "password" and sh(pg, "r.getElementById('si2').value") == "SECRET-TOKEN")
-    pg.click("display-card >> [data-show=si2]")
-    check("the token can be revealed", sh(pg, "r.getElementById('si2').type") == "text")
+    check("setup box shows the URL, a masked device code and the prefilled link",
+          sh(pg, "r.getElementById('si0').value") == "http://ha:8123" and sh(pg, "r.getElementById('si1').type") == "password"
+          and sh(pg, "r.getElementById('si1').value") == "SECRET-KEY_1"
+          and sh(pg, "r.getElementById('si2').value") == "http://192.168.4.1/?url=http%3A%2F%2Fha%3A8123&key=SECRET-KEY_1")
+    check("no token is mentioned any more", "oken" not in sh(pg, "r.getElementById('setupbox').textContent"))
+    pg.click("display-card >> [data-show=si1]")
+    check("the device code can be revealed", sh(pg, "r.getElementById('si1').type") == "text")
     mount(pg, stub(notAdmin=True))
     pg.click("display-card >> #setup"); pg.wait_for_timeout(200)
     check("non-admins get a clear message instead of the token", "Administratoren" in sh(pg, "r.getElementById('msg').textContent") and "SECRET" not in sh(pg, "r.innerHTML"))

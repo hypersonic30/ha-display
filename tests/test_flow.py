@@ -1,39 +1,28 @@
 from homeassistant import config_entries
-from homeassistant.config_entries import ConfigEntryState
 from homeassistant.data_entry_flow import FlowResultType
 
-from custom_components.display.const import CONF_BRIGHTNESS, CONF_HA_URL, CONF_NAME, CONF_TOKEN, DOMAIN, SUBENTRY_DEVICE
+from custom_components.display.const import CONF_BRIGHTNESS, CONF_DEVICE_KEY, CONF_HA_URL, CONF_NAME, CONF_NEW_KEY, DOMAIN, SUBENTRY_DEVICE
 
-from .conftest import device, make_token
+from .conftest import device
 
 
 async def _start(hass):
     return await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
 
 
-async def test_one_connection_with_one_token(hass, token):
+async def test_the_connection_needs_only_the_address_no_token(hass):
     result = await _start(hass)
-    assert result["type"] is FlowResultType.FORM and result["step_id"] == "user"
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_HA_URL: " http://192.168.1.10:8123/ ", CONF_TOKEN: f" {token} "}
-    )
+    assert result["type"] is FlowResultType.FORM and list(result["data_schema"].schema) == [CONF_HA_URL]
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_HA_URL: " http://192.168.1.10:8123/ "})
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["data"] == {CONF_HA_URL: "http://192.168.1.10:8123", CONF_TOKEN: token}
-    assert result["title"] == "ESP32 Display"
+    assert result["data"] == {CONF_HA_URL: "http://192.168.1.10:8123"}
 
 
-async def test_bad_input_is_reported_per_field(hass, token):
-    short_lived = await make_token(hass, long_lived=False, name="browser")
-    for url, tok, field, error in (
-        ("homeassistant.local", token, CONF_HA_URL, "invalid_url"),
-        ("ftp://ha:21", token, CONF_HA_URL, "invalid_url"),
-        ("http://ha:8123", "garbage", CONF_TOKEN, "invalid_auth"),
-        ("http://ha:8123", short_lived, CONF_TOKEN, "not_long_lived"),
-    ):
+async def test_bad_address_is_reported(hass):
+    for url in ("homeassistant.local", "ftp://ha:21", "http://"):
         result = await _start(hass)
-        result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_HA_URL: url, CONF_TOKEN: tok})
-        assert result["type"] is FlowResultType.FORM
-        assert result["errors"] == {field: error}
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_HA_URL: url})
+        assert result["type"] is FlowResultType.FORM and result["errors"] == {CONF_HA_URL: "invalid_url"}, url
 
 
 async def test_second_connection_is_refused(hass, make_entry):
@@ -42,50 +31,56 @@ async def test_second_connection_is_refused(hass, make_entry):
     assert result["type"] is FlowResultType.ABORT and result["reason"] == "single_instance_allowed"
 
 
-async def test_devices_are_subentries_with_unique_names(hass, make_entry):
-    entry = make_entry(device("Küche"))
+async def test_address_can_be_changed(hass, make_entry):
+    entry = make_entry()
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_RECONFIGURE, "entry_id": entry.entry_id}
+    )
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_HA_URL: "https://ha.example.org/"})
+    assert result["type"] is FlowResultType.ABORT and result["reason"] == "reconfigure_successful"
+    assert entry.data == {CONF_HA_URL: "https://ha.example.org"}
+
+
+async def _new_display(hass, entry, name, brightness=50):
     flow = hass.config_entries.subentries
     result = await flow.async_init((entry.entry_id, SUBENTRY_DEVICE), context={"source": config_entries.SOURCE_USER})
-    assert result["type"] is FlowResultType.FORM
-
-    # 'kuche ' is the same panel as 'Küche' (the panel's typed name is matched the same way)
-    clash = await flow.async_configure(result["flow_id"], {CONF_NAME: " kuche ", CONF_BRIGHTNESS: 50})
-    assert clash["errors"] == {CONF_NAME: "name_taken"}
-    empty = await flow.async_configure(result["flow_id"], {CONF_NAME: "  ", CONF_BRIGHTNESS: 50})
-    assert empty["errors"] == {CONF_NAME: "name_invalid"}
-    long = await flow.async_configure(result["flow_id"], {CONF_NAME: "ü" * 20, CONF_BRIGHTNESS: 50})
-    assert long["errors"] == {CONF_NAME: "name_too_long"}
-
-    ok = await flow.async_configure(result["flow_id"], {CONF_NAME: "Flur", CONF_BRIGHTNESS: 40})
-    assert ok["type"] is FlowResultType.CREATE_ENTRY
-    titles = sorted(s.title for s in entry.subentries.values())
-    assert titles == ["Flur", "Küche"]
-    flur = next(s for s in entry.subentries.values() if s.title == "Flur")
-    assert flur.data == {CONF_BRIGHTNESS: 40} and flur.subentry_type == SUBENTRY_DEVICE
+    return result, await flow.async_configure(result["flow_id"], {CONF_NAME: name, CONF_BRIGHTNESS: brightness})
 
 
-async def test_rename_keeps_the_device_and_its_own_name_is_not_a_clash(hass, make_entry):
-    entry = make_entry(device("Küche"), device("Flur"))
-    sub = next(s for s in entry.subentries.values() if s.title == "Küche")
+async def test_every_display_gets_its_own_unguessable_device_key(hass, make_entry):
+    entry = make_entry(device("Küche"))
+    keys = set()
+    for name in ("Flur", "Bad"):
+        _, ok = await _new_display(hass, entry, name)
+        assert ok["type"] is FlowResultType.CREATE_ENTRY
+        keys.add(next(s for s in entry.subentries.values() if s.title == name).data[CONF_DEVICE_KEY])
+    assert len(keys) == 2 and all(len(k) >= 30 for k in keys) and "key-küche" not in keys
+
+
+async def test_display_names_must_be_usable_and_unique(hass, make_entry):
+    entry = make_entry(device("Küche"))
+    for name, error in ((" kuche ", "name_taken"), ("  ", "name_invalid"), ("ü" * 20, "name_too_long")):
+        result, again = await _new_display(hass, entry, name)
+        assert again["errors"] == {CONF_NAME: error}, name
+    assert [s.title for s in entry.subentries.values()] == ["Küche"]
+
+
+async def test_editing_a_display_keeps_its_key_unless_renewed(hass, make_entry):
+    entry = make_entry(device("Küche", key="old-key"))
+    sub = next(iter(entry.subentries.values()))
     flow = hass.config_entries.subentries
-    result = await flow.async_init((entry.entry_id, SUBENTRY_DEVICE), context={"source": config_entries.SOURCE_RECONFIGURE, "subentry_id": sub.subentry_id})
-    same = await flow.async_configure(result["flow_id"], {CONF_NAME: "KÜCHE", CONF_BRIGHTNESS: 25})
-    assert same["type"] is FlowResultType.ABORT and same["reason"] == "reconfigure_successful"
+
+    async def reconfigure(**values):
+        result = await flow.async_init(
+            (entry.entry_id, SUBENTRY_DEVICE), context={"source": config_entries.SOURCE_RECONFIGURE, "subentry_id": sub.subentry_id}
+        )
+        return await flow.async_configure(result["flow_id"], {CONF_NAME: "KÜCHE", CONF_BRIGHTNESS: 25, **values})
+
+    done = await reconfigure(**{CONF_NEW_KEY: False})
+    assert done["type"] is FlowResultType.ABORT and done["reason"] == "reconfigure_successful"
     assert entry.subentries[sub.subentry_id].title == "KÜCHE"
-    assert entry.subentries[sub.subentry_id].data[CONF_BRIGHTNESS] == 25
+    assert entry.subentries[sub.subentry_id].data == {CONF_BRIGHTNESS: 25, CONF_DEVICE_KEY: "old-key"}
 
-
-async def test_revoked_token_starts_reauth_and_a_new_token_fixes_it(hass, make_entry, token):
-    entry = make_entry(device("Küche"), tok="not-a-valid-token")
-    await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
-    assert entry.state is ConfigEntryState.SETUP_ERROR
-    flows = list(entry.async_get_active_flows(hass, {config_entries.SOURCE_REAUTH}))
-    assert len(flows) == 1
-
-    result = await hass.config_entries.flow.async_configure(flows[0]["flow_id"], {CONF_TOKEN: "still-bad"})
-    assert result["errors"] == {CONF_TOKEN: "invalid_auth"}
-    result = await hass.config_entries.flow.async_configure(flows[0]["flow_id"], {CONF_TOKEN: token})
-    assert result["type"] is FlowResultType.ABORT and result["reason"] == "reauth_successful"
-    await hass.async_block_till_done()
-    assert entry.data[CONF_TOKEN] == token and entry.state is ConfigEntryState.LOADED
+    await reconfigure(**{CONF_NEW_KEY: True})
+    fresh = entry.subentries[sub.subentry_id].data[CONF_DEVICE_KEY]
+    assert fresh != "old-key" and len(fresh) >= 30

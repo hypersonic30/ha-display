@@ -3,47 +3,30 @@
     "step": {
       "user": {
         "title": "ESP32-Displays verbinden",
-        "description": "Eine Verbindung für alle Displays. Lege in deinem Home-Assistant-Profil (Sicherheit) ein langlebiges Zugriffstoken an - am besten für einen eigenen Benutzer ohne Admin-Rechte - und nutze es auf jedem Display. Die Displays fügst du danach hinzu.",
+        "description": "Eine Verbindung für alle Displays. Die Displays reden nur mit dieser Integration und brauchen kein Home-Assistant-Token - jedes bekommt später einen eigenen Gerätecode. Die Displays fügst du danach hinzu.",
         "data": {
-          "ha_url": "Home-Assistant-URL",
-          "token": "Langlebiges Zugriffstoken"
+          "ha_url": "Home-Assistant-URL"
         },
         "data_description": {
-          "ha_url": "So erreichen die Displays Home Assistant, z. B. http://192.168.1.10:8123",
-          "token": "Profil -> Sicherheit -> Langlebige Zugriffstoken. Dasselbe Token wird einmal in jedes Display eingetragen."
+          "ha_url": "So erreichen die Displays Home Assistant, z. B. http://192.168.1.10:8123"
         }
       },
       "reconfigure": {
         "title": "Verbindung bearbeiten",
         "data": {
-          "ha_url": "Home-Assistant-URL",
-          "token": "Langlebiges Zugriffstoken"
+          "ha_url": "Home-Assistant-URL"
         },
         "data_description": {
-          "ha_url": "So erreichen die Displays Home Assistant, z. B. http://192.168.1.10:8123",
-          "token": "Ein neues Token musst du nur in die Displays eintragen, die noch das alte haben."
-        }
-      },
-      "reauth_confirm": {
-        "title": "Token nicht mehr gültig",
-        "description": "Das Zugriffstoken dieser Integration wurde gelöscht oder ist abgelaufen. Gib ein neues langlebiges Zugriffstoken ein.",
-        "data": {
-          "token": "Langlebiges Zugriffstoken"
-        },
-        "data_description": {
-          "token": "Profil -> Sicherheit -> Langlebige Zugriffstoken"
+          "ha_url": "So erreichen die Displays Home Assistant. Bei einer neuen Adresse müssen die Displays neu eingerichtet werden."
         }
       }
     },
     "error": {
-      "invalid_url": "Gib eine Adresse wie http://192.168.1.10:8123 ein.",
-      "invalid_auth": "Das ist kein gültiges Zugriffstoken dieses Home Assistant.",
-      "not_long_lived": "Das ist ein kurzlebiges Token. Lege im Profil ein langlebiges Zugriffstoken an."
+      "invalid_url": "Gib eine Adresse wie http://192.168.1.10:8123 ein."
     },
     "abort": {
       "single_instance_allowed": "Es braucht nur eine ESP32-Display-Verbindung - füge ihr weitere Displays hinzu.",
-      "reconfigure_successful": "Verbindung aktualisiert",
-      "reauth_successful": "Token aktualisiert"
+      "reconfigure_successful": "Verbindung aktualisiert"
     }
   },
   "config_subentries": {
@@ -56,7 +39,7 @@
       "step": {
         "user": {
           "title": "Display hinzufügen",
-          "description": "Gib auf der Einrichtungsseite des Displays genau diesen Namen ein, damit es sein Layout findet. Das Layout gestaltest du danach mit der ESP32-Display-Karte.",
+          "description": "Das Display bekommt einen eigenen Gerätecode, den du danach in der Karte unter „Einrichtung“ findest. Das Layout gestaltest du mit der ESP32-Display-Karte.",
           "data": {
             "name": "Name",
             "brightness": "Helligkeit"
@@ -70,11 +53,13 @@
           "title": "Display bearbeiten",
           "data": {
             "name": "Name",
-            "brightness": "Helligkeit"
+            "brightness": "Helligkeit",
+            "new_key": "Neuen Gerätecode erzeugen"
           },
           "data_description": {
-            "name": "Wenn du es umbenennst, ändere den Namen auch auf der Einrichtungsseite des Displays.",
-            "brightness": "Stärke der Hintergrundbeleuchtung dieses Displays"
+            "name": "Der Name kommt vom Server - das Display muss nicht angepasst werden.",
+            "brightness": "Stärke der Hintergrundbeleuchtung dieses Displays",
+            "new_key": "Sperrt das Display mit dem alten Code aus; es muss danach neu eingerichtet werden."
           }
         }
       },

@@ -11,7 +11,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.storage import Store
 
-from .const import DOMAIN, MAX_WIDGETS, SCREEN_H, SCREEN_W, WIDGET_TYPES
+from .const import ACTION_DOMAINS, DOMAIN, MAX_WIDGETS, SCREEN_H, SCREEN_W, WIDGET_TYPES
 
 STORAGE_VERSION = 1
 STORAGE_KEY = f"{DOMAIN}_layouts"
@@ -79,6 +79,8 @@ def validate_widgets(widgets: Any) -> list[dict]:
         seen.add(widget["id"])
         if widget["x"] + widget["w"] > SCREEN_W or widget["y"] + widget["h"] > SCREEN_H:
             raise vol.Invalid(f"widget {index}: outside the {SCREEN_W}x{SCREEN_H} screen")
+        if widget["type"] in ("button", "switch") and widget["entity"] and widget["entity"].split(".")[0] not in ACTION_DOMAINS:
+            raise vol.Invalid(f"widget {index}: a {widget['type']} cannot operate {widget['entity'].split('.')[0]} entities")
         if widget["type"] in ("gauge", "bar") and widget["max"] <= widget["min"]:
             raise vol.Invalid(f"widget {index}: max must be greater than min")
         clean.append(widget)

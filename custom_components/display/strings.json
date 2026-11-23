@@ -3,47 +3,30 @@
     "step": {
       "user": {
         "title": "Connect ESP32 displays",
-        "description": "One connection for all panels. Create a long-lived access token in your Home Assistant profile (Security) - ideally for a dedicated user without admin rights - and use it on every panel. Add the panels afterwards.",
+        "description": "One connection for all panels. The panels only talk to this integration and need no Home Assistant token - each one gets its own device code later. Add the panels afterwards.",
         "data": {
-          "ha_url": "Home Assistant URL",
-          "token": "Long-lived access token"
+          "ha_url": "Home Assistant URL"
         },
         "data_description": {
-          "ha_url": "How the panels reach Home Assistant, e.g. http://192.168.1.10:8123",
-          "token": "Profile -> Security -> Long-lived access tokens. The same token is typed into every panel once."
+          "ha_url": "How the panels reach Home Assistant, e.g. http://192.168.1.10:8123"
         }
       },
       "reconfigure": {
         "title": "Edit connection",
         "data": {
-          "ha_url": "Home Assistant URL",
-          "token": "Long-lived access token"
+          "ha_url": "Home Assistant URL"
         },
         "data_description": {
-          "ha_url": "How the panels reach Home Assistant, e.g. http://192.168.1.10:8123",
-          "token": "A new token only has to be typed into the panels that still carry the old one."
-        }
-      },
-      "reauth_confirm": {
-        "title": "Token no longer valid",
-        "description": "The access token of this integration was deleted or expired. Enter a new long-lived access token.",
-        "data": {
-          "token": "Long-lived access token"
-        },
-        "data_description": {
-          "token": "Profile -> Security -> Long-lived access tokens"
+          "ha_url": "How the panels reach Home Assistant. With a new address the panels have to be set up again."
         }
       }
     },
     "error": {
-      "invalid_url": "Enter an address like http://192.168.1.10:8123",
-      "invalid_auth": "This is not a valid access token of this Home Assistant.",
-      "not_long_lived": "This is a short-lived token. Create a long-lived access token in your profile."
+      "invalid_url": "Enter an address like http://192.168.1.10:8123"
     },
     "abort": {
       "single_instance_allowed": "Only one ESP32 Display connection is needed - add more panels to it.",
-      "reconfigure_successful": "Connection updated",
-      "reauth_successful": "Token updated"
+      "reconfigure_successful": "Connection updated"
     }
   },
   "config_subentries": {
@@ -56,7 +39,7 @@
       "step": {
         "user": {
           "title": "Add display",
-          "description": "Type exactly this name on the panel's setup page, so it finds its layout. Design the layout afterwards with the ESP32 Display card.",
+          "description": "The display gets its own device code, shown afterwards in the card under “Setup”. Design the layout with the ESP32 Display card.",
           "data": {
             "name": "Name",
             "brightness": "Brightness"
@@ -70,11 +53,13 @@
           "title": "Edit display",
           "data": {
             "name": "Name",
-            "brightness": "Brightness"
+            "brightness": "Brightness",
+            "new_key": "Generate a new device code"
           },
           "data_description": {
-            "name": "If you rename it, change the name on the panel's setup page as well.",
-            "brightness": "Backlight strength of this panel"
+            "name": "The name comes from the server - the panel does not need changing.",
+            "brightness": "Backlight strength of this panel",
+            "new_key": "Locks out the display that has the old code; it has to be set up again."
           }
         }
       },

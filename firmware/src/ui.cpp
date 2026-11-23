@@ -109,17 +109,17 @@ void ui_show_error(const char *msg) {
 
 // ── Running screen (until the layout arrives) ─────────────────────────────────
 
-void ui_show_running(const char *device_name, const char *ha_url) {
+void ui_show_running(const char *ha_url) {
     clear_screen();
     lv_obj_t *scr = lv_scr_act();
 
-    lv_obj_t *lbl = make_label(scr, device_name, &ui_font_24, C_ACCENT);
+    lv_obj_t *lbl = make_label(scr, "Verbinde ...", &ui_font_24, C_ACCENT);
     lv_obj_align(lbl, LV_ALIGN_TOP_MID, 0, 20);
 
     lv_obj_t *sub = make_label(scr, ha_url, &ui_font_12, C_MUTED);
     lv_obj_align_to(sub, lbl, LV_ALIGN_OUT_BOTTOM_MID, 0, 6);
 
-    lv_obj_t *placeholder = make_label(scr, "Layout wird geladen...", &ui_font_16, C_MUTED);
+    lv_obj_t *placeholder = make_label(scr, "Warte auf Layout ...", &ui_font_16, C_MUTED);
     lv_obj_align(placeholder, LV_ALIGN_CENTER, 0, 20);
     add_hold_hint(scr);
 }

@@ -98,14 +98,6 @@ static bool parse_num(const char *s, float &out) {
     return end != s && *end == 0 && std::isfinite(out);
 }
 
-static void entity_domain(const char *entity, char *out, size_t n) {
-    const char *dot = strchr(entity, '.');
-    size_t len = dot ? (size_t)(dot - entity) : strlen(entity);
-    if (len >= n) len = n - 1;
-    memcpy(out, entity, len);
-    out[len] = 0;
-}
-
 static void set_value_text(Widget &wg, const char *state) {
     char buf[64];
     bool tight = wg.unit[0] == '%' || ((uint8_t)wg.unit[0] == 0xC2 && (uint8_t)wg.unit[1] == 0xB0);  // "%", "°C"
@@ -124,23 +116,17 @@ static void style_button(Widget &wg, bool on) {
 static void cb_button_tap(lv_event_t *e) {
     Widget *wg = (Widget *)lv_event_get_user_data(e);
     if (!wg->entity_id[0]) return;
-
-    char domain[24];
-    entity_domain(wg->entity_id, domain, sizeof(domain));
-    if (!strcmp(domain, "button") || !strcmp(domain, "input_button")) {
-        ha_client_call_service(domain, "press", wg->entity_id);
-    } else if (!strcmp(domain, "scene") || !strcmp(domain, "script")) {
-        ha_client_call_service(domain, "turn_on", wg->entity_id);
-    } else {
-        ha_client_call_service("homeassistant", "toggle", wg->entity_id);
-        style_button(*wg, strcmp(wg->state, "on") != 0);  // optimistic, HA state follows
-    }
+    ha_client_tap(wg->id);
+    // Optimistic flip for toggling entities; the states frame corrects it.
+    if (strncmp(wg->entity_id, "button.", 7) && strncmp(wg->entity_id, "input_button.", 13) &&
+        strncmp(wg->entity_id, "scene.", 6) && strncmp(wg->entity_id, "script.", 7))
+        style_button(*wg, strcmp(wg->state, "on") != 0);
 }
 
 static void cb_switch_changed(lv_event_t *e) {
     Widget *wg = (Widget *)lv_event_get_user_data(e);
-    bool checked = lv_obj_has_state(wg->sw, LV_STATE_CHECKED);
-    ha_client_call_service("homeassistant", checked ? "turn_on" : "turn_off", wg->entity_id);
+    if (!wg->entity_id[0]) return;
+    ha_client_set(wg->id, lv_obj_has_state(wg->sw, LV_STATE_CHECKED));
 }
 
 // ── Widget builders ───────────────────────────────────────────────────────────

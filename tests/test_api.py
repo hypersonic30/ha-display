@@ -3,7 +3,7 @@ import pytest
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.helpers import entity_registry as er
 
-from custom_components.display.const import CONF_BRIGHTNESS, CONF_HA_URL, CONF_TOKEN, DOMAIN
+from custom_components.display.const import CONF_BRIGHTNESS, CONF_DEVICE_KEY, CONF_HA_URL, DOMAIN
 
 from .conftest import device, make_token
 
@@ -83,72 +83,14 @@ async def test_save_validates_and_cleans(hass, make_entry, admin):
     assert (await call(admin, "display/layout/get", device_id=dev))["result"]["rev"] == 2
 
 
-async def test_only_admins_edit_and_see_the_token(hass, make_entry, user, admin, token):
+async def test_only_admins_edit_and_see_the_device_key(hass, make_entry, user, admin):
     entry = await setup(hass, make_entry, device("Küche"))
     dev = ids(entry)["Küche"]
     assert (await call(user, "display/layout/set", device_id=dev, widgets=[W]))["error"]["code"] == "unauthorized"
     assert (await call(user, "display/setup_info", device_id=dev))["error"]["code"] == "unauthorized"
     assert (await call(user, "display/layout/get", device_id=dev))["success"]
     info = await call(admin, "display/setup_info", device_id=dev)
-    assert info["result"] == {"name": "Küche", CONF_HA_URL: "http://ha.test:8123", CONF_TOKEN: token}
-
-
-async def test_panel_gets_the_layout_and_every_change_live(hass, make_entry, admin, user):
-    entry = await setup(hass, make_entry, device("Küche", brightness=60))
-    dev = ids(entry)["Küche"]
-    await call(admin, "display/layout/set", device_id=dev, widgets=[W])
-
-    # the panel types its name its own way
-    sub_id = await send(user, type="display/layout/subscribe", device=" KUCHE ")
-    assert (await user.receive_json())["success"]
-    first = await user.receive_json()
-    assert first["id"] == sub_id and first["type"] == "event"
-    assert first["event"]["rev"] == 1 and first["event"]["name"] == "Küche"
-    assert first["event"]["settings"] == {"brightness": 60}
-    assert first["event"]["widgets"][0]["unit"] == "°C"
-
-    await call(admin, "display/layout/set", device_id=dev, widgets=[W, {**W, "id": "w2", "y": 100}])
-    pushed = await user.receive_json()
-    assert pushed["id"] == sub_id and pushed["event"]["rev"] == 2 and len(pushed["event"]["widgets"]) == 2
-
-    # changing the display's settings reaches a connected panel without reconnecting
-    hass.config_entries.async_update_subentry(entry, entry.subentries[dev], data={CONF_BRIGHTNESS: 30})
-    await hass.async_block_till_done()
-    changed = await user.receive_json()
-    assert changed["event"]["settings"] == {"brightness": 30}
-
-
-async def test_unknown_panel_gets_a_clear_error(hass, make_entry, user):
-    await setup(hass, make_entry, device("Küche"))
-    reply = await call(user, "display/layout/subscribe", device="Keller")
-    assert not reply["success"] and reply["error"]["code"] == "not_found" and "Keller" in reply["error"]["message"]
-    assert not (await call(user, "display/layout/subscribe", device="   "))["success"]
-
-
-async def test_connected_sensor_follows_the_panel(hass, make_entry, admin, user):
-    entry = await setup(hass, make_entry, device("Küche"))
-    entity_id = er.async_get(hass).async_get_entity_id("binary_sensor", DOMAIN, f"{ids(entry)['Küche']}_connected")
-    assert entity_id and hass.states.get(entity_id).state == "off"
-
-    sub_id = await send(user, type="display/layout/subscribe", device="Küche")
-    await user.receive_json(); await user.receive_json()
-    await hass.async_block_till_done()
-    assert hass.states.get(entity_id).state == "on"
-    assert (await call(admin, "display/devices"))["result"]["devices"][0]["online"] is True
-
-    await user.send_json_auto_id({"type": "unsubscribe_events", "subscription": sub_id})
-    await user.receive_json()
-    await hass.async_block_till_done()
-    assert hass.states.get(entity_id).state == "off"
-
-    # a dropped connection (power cut) counts as offline too
-    await user.send_json_auto_id({"type": "display/layout/subscribe", "device": "Küche"})
-    await user.receive_json(); await user.receive_json()
-    await hass.async_block_till_done()
-    assert hass.states.get(entity_id).state == "on"
-    await user.close()
-    await hass.async_block_till_done()
-    assert hass.states.get(entity_id).state == "off"
+    assert info["result"] == {"name": "Küche", CONF_HA_URL: "http://ha.test:8123", CONF_DEVICE_KEY: "key-küche"}
 
 
 async def test_layouts_of_removed_displays_are_dropped(hass, make_entry, admin):

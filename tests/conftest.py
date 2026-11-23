@@ -6,7 +6,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from homeassistant.auth.models import TOKEN_TYPE_LONG_LIVED_ACCESS_TOKEN
 from homeassistant.config_entries import ConfigSubentryData
 
-from custom_components.display.const import CONF_BRIGHTNESS, CONF_HA_URL, CONF_TOKEN, DOMAIN, SUBENTRY_DEVICE
+from custom_components.display.const import CONF_BRIGHTNESS, CONF_DEVICE_KEY, CONF_HA_URL, DOMAIN, SUBENTRY_DEVICE
 
 
 @pytest.fixture(autouse=True)
@@ -25,24 +25,22 @@ async def make_token(hass, *, long_lived: bool = True, name: str = "panel", admi
     return hass.auth.async_create_access_token(refresh)
 
 
-def device(name: str, brightness: int = 80, unique: str | None = None) -> ConfigSubentryData:
+def device(name: str, brightness: int = 80, key: str | None = None) -> ConfigSubentryData:
     return ConfigSubentryData(
-        data={CONF_BRIGHTNESS: brightness}, subentry_type=SUBENTRY_DEVICE, title=name, unique_id=unique or name.lower()
+        data={CONF_BRIGHTNESS: brightness, CONF_DEVICE_KEY: key or f"key-{name.lower()}"},
+        subentry_type=SUBENTRY_DEVICE,
+        title=name,
+        unique_id=name.lower(),
     )
 
 
 @pytest.fixture
-async def token(hass) -> str:
-    return await make_token(hass)
-
-
-@pytest.fixture
-def make_entry(hass, token):
-    def make(*devices: ConfigSubentryData, tok: str | None = None) -> MockConfigEntry:
+def make_entry(hass):
+    def make(*devices: ConfigSubentryData) -> MockConfigEntry:
         entry = MockConfigEntry(
             domain=DOMAIN,
             title="ESP32 Display",
-            data={CONF_HA_URL: "http://ha.test:8123", CONF_TOKEN: tok or token},
+            data={CONF_HA_URL: "http://ha.test:8123"},
             subentries_data=list(devices),
         )
         entry.add_to_hass(hass)

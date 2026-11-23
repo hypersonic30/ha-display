@@ -244,17 +244,19 @@ class DisplayCard extends HTMLElement {
     dot.classList.toggle("on", sensor ? sensor.state === "on" : dev.online);
   }
 
-  // ── Panel setup info (token of the integration) ───────────────────────────
+  // ── Panel setup info (address + this display's own device code) ───────────
 
   async _toggleSetup() {
     const box = this.shadowRoot.getElementById("setupbox");
     if (box.innerHTML) { box.innerHTML = ""; return; }
     try {
       const info = await this._hass.callWS({ type: "display/setup_info", device_id: this._deviceId });
+      const link = `http://192.168.4.1/?url=${encodeURIComponent(info.ha_url)}&key=${encodeURIComponent(info.device_key)}`;
+      const rows = [["Home-Assistant-URL", info.ha_url, "text"], ["Gerätecode (nur für dieses Display)", info.device_key, "password"], ["Einrichtungslink", link, "password"]];
       box.innerHTML = `<div class="setup">
-        <p class="hint">Ersteinrichtung am Display: mit dem WLAN „ESP32-Display-…“ verbinden (Passwort steht auf dem Display), dann http://192.168.4.1 öffnen und eintragen:</p>
-        ${[["Gerätename", info.name, "text"], ["Home-Assistant-URL", info.ha_url, "text"], ["Zugriffstoken (für alle Displays gleich)", info.token, "password"]].map(([label, value, type], i) => `
-          <div class="row"><span style="width:150px;flex:none">${esc(label)}</span><input readonly type="${type}" value="${esc(value)}" id="si${i}">
+        <p class="hint">Mit dem WLAN „ESP32-Display-…“ des Displays verbinden (Passwort steht auf dem Display) und den <b>Einrichtungslink</b> im Browser öffnen – URL und Gerätecode sind dann schon eingetragen, es fehlt nur dein WLAN. Alternativ http://192.168.4.1 öffnen und die Werte einfügen.</p>
+        ${rows.map(([label, value, type], i) => `
+          <div class="row"><span style="width:170px;flex:none">${esc(label)}</span><input readonly type="${type}" value="${esc(value)}" id="si${i}">
           ${type === "password" ? `<button class="btn" data-show="si${i}">Anzeigen</button>` : ""}<button class="btn" data-copy="si${i}">Kopieren</button></div>`).join("")}
       </div>`;
       box.querySelectorAll("[data-show]").forEach((b) => b.addEventListener("click", () => {

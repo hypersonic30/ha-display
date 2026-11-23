@@ -5,16 +5,17 @@ from pathlib import Path
 from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP
+from homeassistant.core import Event, HomeAssistant
 from homeassistant.helpers import config_validation as cv
 from homeassistant.loader import async_get_integration
 from homeassistant.helpers.typing import ConfigType
 
 from . import websocket_api
-from .const import CARD_FILE, CONF_TOKEN, DOMAIN, STATIC_PATH
+from .const import CARD_FILE, CONF_DEVICE_KEY, DOMAIN, STATIC_PATH
 from .devices import device_subentries
 from .layouts import LayoutStore
+from .panel import CLOSE_GONE, DisplayPingView, DisplaySocketView
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 PLATFORMS = ["binary_sensor"]
@@ -30,19 +31,28 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
     store = LayoutStore(hass)
     await store.async_load()
-    hass.data[DOMAIN] = {"store": store}
+    hass.data[DOMAIN] = {"store": store, "sessions": set()}
     websocket_api.async_register(hass)
+    hass.http.register_view(DisplaySocketView(hass))
+    hass.http.register_view(DisplayPingView())
+
+    async def close_panels(_: Event) -> None:
+        for session in list(hass.data[DOMAIN]["sessions"]):
+            await session.close(1001, "shutdown")
+
+    hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, close_panels)
     return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    # The panels log in with this token, so a revoked one means every panel is locked out.
-    if hass.auth.async_validate_access_token(entry.data[CONF_TOKEN]) is None:
-        raise ConfigEntryAuthFailed("The access token of the display integration is no longer valid")
-
     store: LayoutStore = hass.data[DOMAIN]["store"]
     devices = device_subentries(entry)
     await store.async_prune({sub.subentry_id for sub in devices})
+    # A removed display, or one whose device key was renewed, must not stay connected.
+    keys = {sub.subentry_id: sub.data[CONF_DEVICE_KEY] for sub in devices}
+    for session in list(hass.data[DOMAIN]["sessions"]):
+        if keys.get(session.device_id) != session.key:
+            await session.close(CLOSE_GONE, "gone")
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_reload))
@@ -57,6 +67,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    for session in list(hass.data[DOMAIN]["sessions"]):
+        await session.close(CLOSE_GONE, "gone")
     await hass.data[DOMAIN]["store"].async_clear()
 
 
