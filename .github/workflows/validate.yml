@@ -25,7 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
-      - run: uv venv --python 3.14 .venv && uv pip install --python .venv/bin/python pytest-homeassistant-custom-component
+      - run: uv venv --python 3.14 .venv && uv pip install --python .venv/bin/python pytest-homeassistant-custom-component home-assistant-frontend
       - run: .venv/bin/python -m pytest -q
 
   card:
