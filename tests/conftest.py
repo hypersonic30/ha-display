@@ -3,6 +3,8 @@ from datetime import timedelta
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from homeassistant.setup import async_setup_component
+
 from homeassistant.auth.models import TOKEN_TYPE_LONG_LIVED_ACCESS_TOKEN
 from homeassistant.config_entries import ConfigSubentryData
 
@@ -12,6 +14,12 @@ from custom_components.display.const import CONF_BRIGHTNESS, CONF_DEVICE_KEY, CO
 @pytest.fixture(autouse=True)
 def auto_enable_custom_integrations(enable_custom_integrations):
     yield
+
+
+@pytest.fixture(autouse=True)
+async def frontend_first(hass, auto_enable_custom_integrations):
+    """The integration depends on the frontend. Set it up before any test client freezes the HTTP router."""
+    assert await async_setup_component(hass, "frontend", {})
 
 
 async def make_token(hass, *, long_lived: bool = True, name: str = "panel", admin: bool = False) -> str:
