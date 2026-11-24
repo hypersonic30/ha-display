@@ -1,7 +1,5 @@
 beep:
   target:
-    device:
-      integration: display
     entity:
       integration: display
   fields:
