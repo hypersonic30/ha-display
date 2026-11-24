@@ -4,12 +4,6 @@
 Import("env")
 import glob, os, re
 
-# Slow SPI for the diagnostic builds: a marginal wiring/panel often works at 10 MHz but not at 27 MHz.
-_slow = {"SPI_FREQUENCY": int(env.GetProjectOption("custom_diag_spi", "10000000")),
-         "SPI_READ_FREQUENCY": int(env.GetProjectOption("custom_diag_read", "4000000"))}
-_defs = [d for d in env["CPPDEFINES"] if (d[0] if isinstance(d, (list, tuple)) else d) not in _slow]
-env.Replace(CPPDEFINES=_defs + list(_slow.items()))
-
 n = env.GetProjectOption("custom_diag_init", "")
 if n:
     root = env.subst("$PROJECT_LIBDEPS_DIR")
