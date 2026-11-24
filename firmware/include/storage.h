@@ -1,9 +1,16 @@
 #pragma once
 #include <Arduino.h>
 
+#define MAX_WIFI 3   // saved WLANs, tried in order of signal strength
+
+struct WifiNet {
+    char ssid[33];
+    char pass[64];
+};
+
 struct Config {
-    char wifi_ssid[64];
-    char wifi_pass[64];
+    WifiNet wifi[MAX_WIFI];
+    int  wifi_count;       // 1..MAX_WIFI, no gaps
     char ha_url[128];
     char device_key[64];   // per-display code issued by the integration
 };

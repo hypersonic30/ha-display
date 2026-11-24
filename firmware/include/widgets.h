@@ -21,3 +21,8 @@ void widgets_tick();
 // Forget all widget handles without deleting objects. Must be called whenever
 // something else cleans the screen (ui.cpp does so before drawing a status screen).
 void widgets_reset();
+
+// True if (x, y) lies on (or close to) something that takes input: an operable widget, the page switcher or
+// an open dropdown list. Passive widgets (label, gauge, bar, led, clock, panel) and the background are
+// "empty": a long press there opens the WLAN setup.
+bool widgets_input_at(int x, int y);

@@ -54,6 +54,8 @@ struct Widget {
 
 static Widget _w[MAX_WIDGETS];
 static int    _count = 0;
+static lv_area_t _pager_area;       // page switcher (see build_pager)
+static bool      _has_pager = false;
 
 // ── Shared styles (created once) ──────────────────────────────────────────────
 
@@ -782,6 +784,9 @@ static void build_pager(JsonObjectConst pg, JsonObjectConst page) {
 
     lv_obj_t *card = make_card(x, y, w, h);
     lv_obj_set_style_pad_all(card, 0, LV_PART_MAIN);
+    lv_obj_update_layout(card);
+    lv_obj_get_coords(card, &_pager_area);
+    _has_pager = true;
 
     int aw = (int)(h * 1.2f);
     if (aw > w / 3) aw = w / 3;
@@ -924,6 +929,28 @@ static void refresh(Widget &wg) {
 void widgets_reset() {
     memset(_w, 0, sizeof(_w));
     _count = 0;
+    _has_pager = false;
+}
+
+static bool area_hit(const lv_area_t &a, int x, int y, int margin) {
+    return x >= a.x1 - margin && x <= a.x2 + margin && y >= a.y1 - margin && y <= a.y2 + margin;
+}
+
+bool widgets_input_at(int x, int y) {
+    const int MARGIN = 8;   // a finger is not a needle
+    if (_has_pager && area_hit(_pager_area, x, y, MARGIN)) return true;
+    for (int i = 0; i < _count; i++) {
+        const Widget &w = _w[i];
+        if (w.type == WT_DROPDOWN && w.ctl && lv_dropdown_is_open(w.ctl)) return true;   // its list covers the page
+        switch (w.type) {
+        case WT_LABEL: case WT_GAUGE: case WT_BAR: case WT_LED: case WT_CLOCK: case WT_PANEL: continue;
+        default: break;
+        }
+        lv_area_t a;
+        if (w.root)     { lv_obj_get_coords(w.root, &a); if (area_hit(a, x, y, MARGIN)) return true; }
+        if (w.ctl)      { lv_obj_get_coords(w.ctl, &a);  if (area_hit(a, x, y, MARGIN)) return true; }
+    }
+    return false;
 }
 
 static WidgetType type_of(const char *type) {

@@ -9,7 +9,9 @@ static const lv_color_t C_MUTED  = LV_COLOR_MAKE(0x88, 0x88, 0x88);
 static const lv_color_t C_WHITE  = LV_COLOR_MAKE(0xe0, 0xe0, 0xe0);
 static const lv_color_t C_ERR    = LV_COLOR_MAKE(0xef, 0x53, 0x50);
 
-static const char *HOLD_HINT = "Touch 3 s halten: Setup";
+static const char *HOLD_HINT = "Leere Stelle 3 s halten: WLAN & Setup";
+
+static void (*cancel_cb)() = nullptr;
 
 static lv_obj_t *update_bar = nullptr;
 static lv_obj_t *update_pct = nullptr;
@@ -56,13 +58,31 @@ void ui_init() {
 
 // ── Provisioning screen ───────────────────────────────────────────────────────
 
-void ui_show_provisioning(const char *ap_ssid, const char *ap_pass, const char *url) {
+static void cb_cancel(lv_event_t *) {
+    if (cancel_cb) cancel_cb();
+}
+
+void ui_show_provisioning(const char *ap_ssid, const char *ap_pass, const char *url,
+                          void (*on_cancel)(), const char *note) {
     clear_screen();
+    cancel_cb = on_cancel;
     lv_obj_t *scr = lv_scr_act();
     const int W = scr_w(), H = scr_h();
 
-    lv_obj_t *title = make_label(scr, "ESP32 Display", &ui_font_24, C_ACCENT);
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
+    lv_obj_t *title = make_label(scr, "WLAN & Setup", &ui_font_24, C_ACCENT);
+    lv_obj_align(title, LV_ALIGN_TOP_LEFT, 14, 10);
+
+    if (on_cancel) {
+        lv_obj_t *btn = lv_btn_create(scr);
+        lv_obj_set_size(btn, 96, 34);
+        lv_obj_align(btn, LV_ALIGN_TOP_RIGHT, -10, 6);
+        lv_obj_set_style_bg_color(btn, C_CARD, LV_PART_MAIN);
+        lv_obj_set_style_border_width(btn, 1, LV_PART_MAIN);
+        lv_obj_set_style_border_color(btn, C_MUTED, LV_PART_MAIN);
+        lv_obj_add_event_cb(btn, cb_cancel, LV_EVENT_CLICKED, nullptr);
+        lv_obj_t *bl = make_label(btn, "Abbrechen", &ui_font_14, C_WHITE);
+        lv_obj_center(bl);
+    }
 
     const int card_w = W - 20 < 440 ? W - 20 : 440;
     lv_obj_t *card = lv_obj_create(scr);
@@ -97,6 +117,8 @@ void ui_show_provisioning(const char *ap_ssid, const char *ap_pass, const char *
     lv_obj_set_style_pad_top(step2, 12, LV_PART_MAIN);
 
     left(url, &ui_font_20, C_ACCENT);
+
+    if (note && note[0]) left(note, &ui_font_12, C_MUTED);
 }
 
 // ── Connecting screen ─────────────────────────────────────────────────────────

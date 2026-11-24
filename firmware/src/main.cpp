@@ -23,6 +23,8 @@ static lv_disp_t         *disp = nullptr;
 
 static uint16_t touch_x = 0, touch_y = 0;
 static uint32_t press_since = 0;   // 0 = not pressed
+static int      press_x = 0, press_y = 0;   // where the current press started
+static bool     press_moved = false;        // the finger travelled: a drag, not a hold
 
 // Screen rotation 0..3 (0 = landscape 480x320, 1 = portrait 320x480, ...). The layout decides it.
 static int  cur_rotation     = 0;
@@ -46,7 +48,12 @@ static void touch_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {
     if (tft.getTouch(&x, &y)) {
         touch_x = x;
         touch_y = y;
-        if (!press_since) press_since = millis() ? millis() : 1;
+        if (!press_since) {
+            press_since = millis() ? millis() : 1;
+            press_x = x; press_y = y; press_moved = false;
+        } else if (abs((int)x - press_x) > 20 || abs((int)y - press_y) > 20) {
+            press_moved = true;
+        }
         data->state = LV_INDEV_STATE_PRESSED;
     } else {
         press_since = 0;
@@ -172,6 +179,11 @@ enum State { PROVISIONING, CONNECTING_WIFI, TESTING_HA, RUNNING };
 static State  state;
 static Config cfg;
 
+static const uint32_t WIFI_TRY_MS      = 15000;    // per saved network
+static const uint32_t AUTO_PORTAL_MS   = 90000;    // no saved WLAN reachable this long -> open the setup hotspot
+static const uint32_t PORTAL_TIMEOUT_MS = 300000;  // a portal opened by hand closes itself
+static const uint32_t WIFI_LOST_MS     = 8000;     // RUNNING without WLAN this long -> reconnect logic
+
 static uint32_t connect_start;
 static bool     wifi_fail_shown;
 static uint32_t next_ha_try;
@@ -179,7 +191,21 @@ static bool     ha_fail_shown;
 static bool     ha_missing;
 static HaStatus last_ha_status;
 
-static bool    status_screen = false;  // a screen without widgets: hold touch -> setup
+// Saved networks in the order they are tried, and the one being tried.
+static int      net_order[MAX_WIFI];
+static int      net_pos = 0;
+static uint32_t offline_since = 0;   // 0 = online; else when the WLAN was lost / boot started
+static uint32_t wifi_lost_at  = 0;   // RUNNING: first moment without WLAN
+
+// Setup hotspot: either the only thing running (PROVISIONING) or on top of the connection attempts
+// (portal_overlay, state stays CONNECTING_WIFI).
+static bool     portal_overlay   = false;
+static bool     portal_manual    = false;   // opened by a long press (closes after PORTAL_TIMEOUT_MS)
+static bool     portal_cancelable = false;
+static bool     portal_cancel    = false;   // set by the Abbrechen button
+static uint32_t portal_opened    = 0;
+
+static bool    status_screen = false;  // a screen without widgets
 static int32_t built_rev     = -1;     // layout revision currently on screen
 static int     built_page    = -1;     // page index currently on screen
 
@@ -196,29 +222,88 @@ static void screen_error(const char *msg) {
     Serial.printf("[ERROR] %s\n", msg);
 }
 
-static void enter_provisioning() {
-    ha_client_stop();
-    WiFi.disconnect();
-    state = PROVISIONING;
+static void on_portal_cancel() { portal_cancel = true; }   // LVGL callback: act from loop()
+
+static void show_portal(const char *note) {
     status_screen = false;
     built_rev = -1; built_page = -1;
-    provisioning_begin(ap_ssid);
-    ui_show_provisioning(ap_ssid, provisioning_ap_pass(), "192.168.4.1");
+    portal_cancel = false;
+    portal_opened = millis();
+    ui_show_provisioning(ap_ssid, provisioning_ap_pass(), "192.168.4.1",
+                         portal_cancelable ? on_portal_cancel : nullptr, note);
+}
+
+// First boot (no saved WLAN) or opened by hand from a running page: the hotspot is all that runs.
+static void enter_provisioning(bool by_hand) {
+    ha_client_stop();
+    if (!by_hand) WiFi.disconnect();   // by hand the station stays connected
+    state = PROVISIONING;
+    portal_overlay = false;
+    portal_manual = by_hand;
+    portal_cancelable = by_hand;
+    provisioning_begin(ap_ssid, cfg.wifi_count ? &cfg : nullptr);
+    show_portal(by_hand ? "Ohne Eingabe läuft das Display nach 5 Minuten normal weiter." : nullptr);
     Serial.printf("[STATE] -> PROVISIONING  SSID: %s\n", ap_ssid);
 }
 
+// While the display is offline: open the hotspot next to the connection attempts, which keep running.
+// A saved network that comes back closes it again.
+static void open_portal_overlay(bool by_hand) {
+    portal_overlay = true;
+    portal_manual = by_hand;
+    portal_cancelable = true;
+    provisioning_begin(ap_ssid, &cfg);
+    show_portal("Die gespeicherten WLANs werden weiter versucht.");
+    Serial.printf("[PORTAL] overlay opened (%s)\n", by_hand ? "by hand" : "no WLAN for 90 s");
+}
+
+static void close_portal() {
+    provisioning_end();
+    portal_overlay = false;
+    portal_manual = false;
+    portal_cancelable = false;
+    portal_cancel = false;
+}
+
+// Order the saved networks: visible ones by signal strength first (only worth a scan with several; skipped
+// while the hotspot is up because a scan would disturb it), the rest in saved order.
+static void wifi_plan() {
+    int n = cfg.wifi_count;
+    int rssi[MAX_WIFI];
+    for (int i = 0; i < n; i++) { net_order[i] = i; rssi[i] = -1000; }
+    if (n > 1 && !portal_overlay) {
+        int found = WiFi.scanNetworks();
+        for (int k = 0; k < found; k++) {
+            String ss = WiFi.SSID(k);
+            for (int i = 0; i < n; i++)
+                if (ss == cfg.wifi[i].ssid && WiFi.RSSI(k) > rssi[i]) rssi[i] = WiFi.RSSI(k);
+        }
+        WiFi.scanDelete();
+        for (int i = 1; i < n; i++) {   // stable insertion sort, strongest first
+            int v = net_order[i], j = i - 1;
+            while (j >= 0 && rssi[net_order[j]] < rssi[v]) { net_order[j + 1] = net_order[j]; j--; }
+            net_order[j + 1] = v;
+        }
+    }
+    net_pos = 0;
+}
+
 static void wifi_begin() {
+    const WifiNet &w = cfg.wifi[net_order[net_pos]];
     WiFi.disconnect();
-    WiFi.begin(cfg.wifi_ssid, cfg.wifi_pass);
+    WiFi.begin(w.ssid, w.pass);
     connect_start = millis();
+    Serial.printf("[WIFI] trying '%s' (%d/%d)\n", w.ssid, net_pos + 1, cfg.wifi_count);
 }
 
 static void enter_connecting_wifi() {
     state = CONNECTING_WIFI;
     wifi_fail_shown = false;
+    if (!offline_since) offline_since = millis() ? millis() : 1;
+    wifi_plan();
     wifi_begin();
     screen_connecting("Verbinde mit WLAN...");
-    Serial.printf("[STATE] -> CONNECTING_WIFI  SSID: %s\n", cfg.wifi_ssid);
+    Serial.printf("[STATE] -> CONNECTING_WIFI  %d saved network(s)\n", cfg.wifi_count);
 }
 
 static void enter_testing_ha() {
@@ -318,11 +403,11 @@ void setup() {
     build_ap_ssid();
 
     if (storage_load(cfg)) {
-        Serial.printf("[BOOT] Credentials found, connecting to %s\n", cfg.wifi_ssid);
+        Serial.printf("[BOOT] Credentials found, %d saved network(s)\n", cfg.wifi_count);
         enter_connecting_wifi();
     } else {
         Serial.println("[BOOT] No credentials, starting provisioning");
-        enter_provisioning();
+        enter_provisioning(false);
     }
 }
 
@@ -337,11 +422,36 @@ void loop() {
     lv_task_handler();
     ota_loop_tick(WiFi.status() == WL_CONNECTED);
 
-    if (state != PROVISIONING && status_screen && touch_hold_ms() >= HOLD_MS) {
+    // Long press on an empty spot (not on an operable widget, not a drag): WLAN setup. Pages without any
+    // empty spot are covered by the automatic hotspot after 90 s without WLAN.
+    if (state != PROVISIONING && !portal_overlay && !ota_running() && touch_hold_ms() >= HOLD_MS) {
+        bool empty = !press_moved && !widgets_input_at(press_x, press_y);
         press_since = 0;
-        enter_provisioning();
-        delay(5);
-        return;
+        if (empty) {
+            if (state == CONNECTING_WIFI) open_portal_overlay(true);
+            else                          enter_provisioning(true);
+            delay(5);
+            return;
+        }
+    }
+
+    // The hotspot next to the connection attempts: web page, cancel, timeout.
+    if (portal_overlay) {
+        provisioning_handle();
+        if (provisioning_done()) {
+            cfg = provisioning_config();
+            storage_save(cfg);
+            close_portal();
+            offline_since = 0;
+            enter_connecting_wifi();
+            return;
+        }
+        if (portal_cancel || (portal_manual && millis() - portal_opened > PORTAL_TIMEOUT_MS)) {
+            close_portal();
+            offline_since = millis() ? millis() : 1;   // the next automatic hotspot is 90 s away again
+            enter_connecting_wifi();
+            return;
+        }
     }
 
     switch (state) {
@@ -351,24 +461,41 @@ void loop() {
         if (provisioning_done()) {
             cfg = provisioning_config();
             storage_save(cfg);
-            provisioning_end();
+            close_portal();
+            offline_since = 0;
             enter_connecting_wifi();
+        } else if (portal_cancel || (portal_manual && millis() - portal_opened > PORTAL_TIMEOUT_MS)) {
+            close_portal();
+            if (WiFi.status() == WL_CONNECTED) enter_testing_ha();   // the connection was never dropped
+            else                               enter_connecting_wifi();
         }
         break;
 
     case CONNECTING_WIFI:
         if (WiFi.status() == WL_CONNECTED) {
-            Serial.printf("[WIFI] Connected, IP: %s\n", WiFi.localIP().toString().c_str());
+            Serial.printf("[WIFI] Connected to '%s', IP: %s\n", WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
+            if (portal_overlay) close_portal();
+            offline_since = 0;
             enter_testing_ha();
-        } else if (millis() - connect_start > 20000) {
-            if (!wifi_fail_shown) {
-                char msg[128];
-                snprintf(msg, sizeof(msg), "WLAN '%s' nicht erreichbar.\nNeuer Versuch läuft...",
-                         cfg.wifi_ssid);
-                screen_error(msg);
-                wifi_fail_shown = true;
+        } else {
+            if (!portal_overlay && millis() - offline_since >= AUTO_PORTAL_MS) {
+                open_portal_overlay(false);
+            } else if (millis() - connect_start > WIFI_TRY_MS) {
+                // next saved network; after a full round without luck say so (not over the hotspot screen)
+                if (++net_pos >= cfg.wifi_count) {
+                    if (!wifi_fail_shown && !portal_overlay) {
+                        char msg[128];
+                        if (cfg.wifi_count == 1)
+                            snprintf(msg, sizeof(msg), "WLAN '%s' nicht erreichbar.\nNeuer Versuch läuft...", cfg.wifi[0].ssid);
+                        else
+                            snprintf(msg, sizeof(msg), "Kein gespeichertes WLAN erreichbar.\nNeuer Versuch läuft...");
+                        screen_error(msg);
+                        wifi_fail_shown = true;
+                    }
+                    wifi_plan();   // new round (net_pos = 0)
+                }
+                wifi_begin();
             }
-            wifi_begin();
         }
         break;
 
@@ -395,6 +522,18 @@ void loop() {
         break;
 
     case RUNNING:
+        if (WiFi.status() != WL_CONNECTED) {
+            if (!wifi_lost_at) wifi_lost_at = millis() ? millis() : 1;
+            if (millis() - wifi_lost_at > WIFI_LOST_MS) {   // the automatic reconnect did not help
+                offline_since = wifi_lost_at;
+                wifi_lost_at = 0;
+                ha_client_stop();
+                enter_connecting_wifi();
+                break;
+            }
+        } else {
+            wifi_lost_at = 0;
+        }
         if (ota_pending()) { run_ota(); break; }
         ha_client_tick();
         widgets_tick();

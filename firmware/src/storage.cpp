@@ -1,17 +1,34 @@
 #include "storage.h"
 #include <Preferences.h>
+#include <cstring>
 
 static const char *NS = "display";
 
+// Slot 0 keeps the key names of the first firmware ("wifi_ssid"/"wifi_pass"), so an update keeps the
+// saved network. Further slots are "wifi_ssid1"/"wifi_pass1", "wifi_ssid2"/"wifi_pass2".
+static void wifi_keys(int i, char *ks, char *kp, size_t n) {
+    if (i == 0) { snprintf(ks, n, "wifi_ssid"); snprintf(kp, n, "wifi_pass"); }
+    else        { snprintf(ks, n, "wifi_ssid%d", i); snprintf(kp, n, "wifi_pass%d", i); }
+}
+
 bool storage_load(Config &cfg) {
+    memset(&cfg, 0, sizeof(cfg));
     Preferences p;
     p.begin(NS, true);
     bool valid = p.getBool("valid", false) && p.isKey("device_key");
     if (valid) {
-        p.getString("wifi_ssid",    cfg.wifi_ssid,    sizeof(cfg.wifi_ssid));
-        p.getString("wifi_pass",    cfg.wifi_pass,    sizeof(cfg.wifi_pass));
+        for (int i = 0; i < MAX_WIFI; i++) {
+            char ks[16], kp[16];
+            wifi_keys(i, ks, kp, sizeof(ks));
+            WifiNet &w = cfg.wifi[cfg.wifi_count];
+            p.getString(ks, w.ssid, sizeof(w.ssid));
+            p.getString(kp, w.pass, sizeof(w.pass));
+            if (w.ssid[0]) cfg.wifi_count++;
+            else           memset(&w, 0, sizeof(w));
+        }
         p.getString("ha_url",       cfg.ha_url,       sizeof(cfg.ha_url));
         p.getString("device_key",   cfg.device_key,   sizeof(cfg.device_key));
+        if (cfg.wifi_count == 0) valid = false;
     }
     p.end();
     return valid;
@@ -20,8 +37,17 @@ bool storage_load(Config &cfg) {
 void storage_save(const Config &cfg) {
     Preferences p;
     p.begin(NS, false);
-    p.putString("wifi_ssid",   cfg.wifi_ssid);
-    p.putString("wifi_pass",   cfg.wifi_pass);
+    for (int i = 0; i < MAX_WIFI; i++) {
+        char ks[16], kp[16];
+        wifi_keys(i, ks, kp, sizeof(ks));
+        if (i < cfg.wifi_count) {
+            p.putString(ks, cfg.wifi[i].ssid);
+            p.putString(kp, cfg.wifi[i].pass);
+        } else {
+            p.remove(ks);
+            p.remove(kp);
+        }
+    }
     p.putString("ha_url",      cfg.ha_url);
     p.putString("device_key",  cfg.device_key);
     p.putBool("valid", true);
