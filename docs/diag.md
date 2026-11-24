@@ -13,3 +13,6 @@ Serielle Zeilen `[DIAG]`: `0xBF` = `.. 02 04 94 81 ..` ILI9481, `0xD3` = `00 00 
 `00 93 41` ILI9341. Nur `00` oder `FF`: das Modul antwortet nicht (MISO nicht am Display) – dann zählt nur das Bild.
 Zeigt eine Variante die Farben in der richtigen Reihenfolge, ist sie die richtige; sind Farben vertauscht oder
 negativ, stimmt `TFT_RGB_ORDER`/`TFT_INVERSION_ON`.
+
+Ergebnis am Autoren-Board (ILI9481, parallele Leiterbahnen): 5 und 10 MHz zeigen ein korrektes Bild mit richtigen Farben, 16 MHz bleibt schwarz.
+Deshalb nutzt `[env:ili9481]` seit 0.6.2 10 MHz (Lesetakt 4 MHz); `[env:ili9488]` ist unverändert (27 MHz).
