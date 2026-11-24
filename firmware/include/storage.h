@@ -13,6 +13,7 @@ struct Config {
     int  wifi_count;       // 1..MAX_WIFI, no gaps
     char ha_url[128];
     char device_key[64];   // per-display code issued by the integration
+    bool tls_verify;       // https: check the certificate chain and host name (default on)
 };
 
 bool  storage_load(Config &cfg);

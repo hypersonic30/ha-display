@@ -1,6 +1,7 @@
 #include "ota.h"
 #include "ha_client.h"
 #include "ui.h"
+#include "tls.h"
 #include <HTTPClient.h>
 #include <Preferences.h>
 #include <Update.h>
@@ -142,7 +143,7 @@ bool ota_run(const Config &cfg) {
 
     WiFiClient       plain;
     WiFiClientSecure secure;
-    secure.setInsecure();   // same trust model as the WebSocket: LAN device without a CA store
+    tls_configure(secure, u.tls && cfg.tls_verify);   // same trust setting as the WebSocket
 
     HTTPClient http;
     http.setConnectTimeout(5000);

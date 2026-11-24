@@ -9,6 +9,7 @@
 #include "ha_client.h"
 #include "widgets.h"
 #include "ota.h"
+#include "tls.h"
 
 // ── Display, touch & LVGL ─────────────────────────────────────────────────────
 
@@ -658,9 +659,14 @@ void loop() {
                 // 404 = reachable but no integration there; anything else = not reachable
                 bool missing = (code == 404);
                 if (!ha_fail_shown || missing != ha_missing) {
-                    screen_error(missing
-                        ? "Integration 'ESP32 Display' nicht gefunden.\nURL prüfen. Neuer Versuch läuft..."
-                        : "Home Assistant nicht erreichbar.\nURL prüfen. Neuer Versuch läuft...");
+                    char msg[200];
+                    if (missing)
+                        strlcpy(msg, "Integration 'ESP32 Display' nicht gefunden.\nURL prüfen. Neuer Versuch läuft...", sizeof(msg));
+                    else if (tls_last_error()[0])
+                        snprintf(msg, sizeof(msg), "Sichere Verbindung fehlgeschlagen:\n%s\nNeuer Versuch läuft...", tls_last_error());
+                    else
+                        strlcpy(msg, "Home Assistant nicht erreichbar.\nURL prüfen. Neuer Versuch läuft...", sizeof(msg));
+                    screen_error(msg);
                     ha_fail_shown = true;
                     ha_missing = missing;
                 }

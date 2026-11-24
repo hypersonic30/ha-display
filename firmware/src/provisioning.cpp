@@ -48,6 +48,8 @@ button[type=submit]:disabled{opacity:.5;cursor:not-allowed}
 .status.err{background:#4a1b1b;color:var(--err);display:block}
 .status.info{background:#1a2a3a;color:var(--accent);display:block}
 .hint{color:var(--muted);font-size:.8rem;margin-top:8px}
+label.chk{display:flex;gap:8px;align-items:center;color:var(--text);margin-top:16px}
+label.chk input{width:auto}
 .net{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #2a2a40}
 .net:last-of-type{border-bottom:none}
 .net span{overflow-wrap:anywhere}
@@ -91,6 +93,8 @@ button[type=submit]:disabled{opacity:.5;cursor:not-allowed}
     <label>Gerätecode</label>
     <input name="device_key" id="device_key" type="password" placeholder="wird in Home Assistant unter 'Einrichtung' angezeigt" autocomplete="off" autocapitalize="off" spellcheck="false">
     <p class="hint" id="keyhint"></p>
+    <label class="chk"><input type="checkbox" id="tls" checked> Zertifikat prüfen (bei https://)</label>
+    <p class="hint">Prüft Zertifikat und Rechnernamen gegen die Standard-Zertifizierungsstellen. Für https:// mit eigenem (selbst signiertem) Zertifikat im Heimnetz ausschalten. Mit einer IP-Adresse statt eines Namens passt das Zertifikat meist nicht.</p>
   </div>
 
   <button type="submit" id="btn">Verbinden &amp; Speichern</button>
@@ -149,7 +153,8 @@ document.getElementById('frm').addEventListener('submit',async e=>{
   const data={
     nets:nets.map(n=>n.keep?{ssid:n.ssid,keep:true}:{ssid:n.ssid,password:n.password}),
     ha_url:document.getElementById('ha_url').value.trim().replace(/\/+$/,''),
-    device_key:document.getElementById('device_key').value.trim()
+    device_key:document.getElementById('device_key').value.trim(),
+    tls_verify:document.getElementById('tls').checked
   };
   try{
     const r=await fetch('/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
@@ -172,6 +177,7 @@ document.getElementById('frm').addEventListener('submit',async e=>{
     nets=s.nets.map(x=>({ssid:x,keep:true}));
     hasKey=!!s.has_key;
     document.getElementById('ha_url').value=s.ha_url||'';
+    document.getElementById('tls').checked=s.tls_verify!==false;
   }catch(e){}
   const q=new URLSearchParams(location.search);
   if(q.get('url'))document.getElementById('ha_url').value=q.get('url');
@@ -199,6 +205,7 @@ static void handle_state() {
     for (int i = 0; i < cur_cfg.wifi_count; i++) nets.add((const char *)cur_cfg.wifi[i].ssid);
     doc["ha_url"]  = (const char *)cur_cfg.ha_url;
     doc["has_key"] = cur_cfg.device_key[0] != 0;
+    doc["tls_verify"] = cur_cfg.tls_verify;
     String out;
     serializeJson(doc, out);
     send_json(200, out.c_str());
@@ -282,6 +289,7 @@ static void handle_save() {
         return fail("URL muss mit http:// oder https:// beginnen");
     if (ha_url.length() >= sizeof(next.ha_url)) return fail("URL zu lang");
 
+    next.tls_verify = doc["tls_verify"] | true;
     strlcpy(next.ha_url,     ha_url.c_str(), sizeof(next.ha_url));
     strlcpy(next.device_key, key.c_str(),    sizeof(next.device_key));
     saved_cfg = next;
@@ -302,6 +310,7 @@ static void handle_captive() {
 void provisioning_begin(const char *ap_ssid, const Config *current) {
     cfg_ready = false;
     memset(&cur_cfg, 0, sizeof(cur_cfg));
+    cur_cfg.tls_verify = true;
     if (current) cur_cfg = *current;
 
     // No look-alike characters (0/O, 1/I/L): the password is read off the display

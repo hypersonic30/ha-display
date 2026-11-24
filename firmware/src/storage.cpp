@@ -13,6 +13,7 @@ static void wifi_keys(int i, char *ks, char *kp, size_t n) {
 
 bool storage_load(Config &cfg) {
     memset(&cfg, 0, sizeof(cfg));
+    cfg.tls_verify = true;
     Preferences p;
     p.begin(NS, true);
     bool valid = p.getBool("valid", false) && p.isKey("device_key");
@@ -28,6 +29,7 @@ bool storage_load(Config &cfg) {
         }
         p.getString("ha_url",       cfg.ha_url,       sizeof(cfg.ha_url));
         p.getString("device_key",   cfg.device_key,   sizeof(cfg.device_key));
+        cfg.tls_verify = p.getBool("tls_verify", true);
         if (cfg.wifi_count == 0) valid = false;
     }
     p.end();
@@ -50,6 +52,7 @@ void storage_save(const Config &cfg) {
     }
     p.putString("ha_url",      cfg.ha_url);
     p.putString("device_key",  cfg.device_key);
+    p.putBool("tls_verify", cfg.tls_verify);
     p.putBool("valid", true);
     p.end();
 }

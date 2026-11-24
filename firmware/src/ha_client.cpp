@@ -3,6 +3,7 @@
 #include <HTTPClient.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
+#include "tls.h"
 #include <strings.h>
 #include "ota.h"
 
@@ -12,6 +13,7 @@ static layout_cb_t _on_layout = nullptr;
 static frame_cb_t  _on_frame  = nullptr;
 static Config      _cfg;
 
+static bool     _cfg_tls     = false;   // the connection is https
 static bool     _connected   = false;
 static bool     _have_layout = false;
 static bool     _halted      = true;
@@ -57,18 +59,34 @@ int ha_check(const Config &cfg) {
     snprintf(url, sizeof(url), "%s://%s:%u%s/api/display/ping", u.tls ? "https" : "http",
              u.host, (unsigned)u.port, u.prefix);
 
+    tls_set_error("");
+    bool verify = u.tls && cfg.tls_verify;
+    if (verify && !tls_sync_clock(u.host, u.port)) return -1;
+
     WiFiClient       plain;
     WiFiClientSecure secure;
-    secure.setInsecure();  // LAN device without a CA store: encrypts, does not authenticate
+    tls_configure(secure, verify);
 
     HTTPClient http;
     http.setConnectTimeout(4000);
     http.setTimeout(5000);
     bool ok = u.tls ? http.begin(secure, url) : http.begin(plain, url);
     if (!ok) return -1;
+    if (u.tls) tls_log_heap("before handshake");
     int code = http.GET();
+    if (u.tls) {
+        tls_log_heap("after handshake");
+        if (code < 0) {
+            char e[96] = "";
+            secure.lastError(e, sizeof(e));
+            if (e[0]) {
+                Serial.printf("[TLS] %s\n", e);
+                tls_set_error(e);
+            }
+        }
+    }
     http.end();
-    Serial.printf("[HA] GET %s -> %d\n", url, code);
+    Serial.printf("[HA] GET %s -> %d%s\n", url, code, verify ? " (certificate checked)" : "");
     return code;
 }
 
@@ -137,6 +155,7 @@ static void ws_event(WStype_t type, uint8_t *payload, size_t length) {
     switch (type) {
     case WStype_CONNECTED:
         Serial.println("[HA] WS connected");
+        if (_cfg_tls) tls_log_heap("websocket connected");
         _connected   = true;
         _have_layout = false;
         send_hello();
@@ -167,17 +186,24 @@ void ha_client_begin(const Config &cfg, state_cb_t on_state, layout_cb_t on_layo
     char path[96];
     snprintf(path, sizeof(path), "%s/api/display/ws", u.prefix);
 
-    if (u.tls) ws.beginSSL(u.host, u.port, path);
-    else       ws.begin(u.host, u.port, path);
+    if (u.tls && cfg.tls_verify) {
+        tls_sync_clock(u.host, u.port);   // already set by ha_check() in the normal flow
+        ws.beginSslWithBundle(u.host, u.port, path, TLS_BUILTIN_BUNDLE, 1);
+    } else if (u.tls) {
+        ws.beginSSL(u.host, u.port, path);
+    } else {
+        ws.begin(u.host, u.port, path);
+    }
     ws.onEvent(ws_event);
     ws.setReconnectInterval(5000);
     ws.enableHeartbeat(15000, 3000, 2);
 
+    _cfg_tls = u.tls;
     _halted = false;
     _status = HA_CONNECTING;
     _connected = _have_layout = false;
-    Serial.printf("[HA] WS -> %s://%s:%u%s\n", u.tls ? "wss" : "ws", u.host,
-                  (unsigned)u.port, path);
+    Serial.printf("[HA] WS -> %s://%s:%u%s%s\n", u.tls ? "wss" : "ws", u.host,
+                  (unsigned)u.port, path, (u.tls && cfg.tls_verify) ? " (certificate checked)" : "");
 }
 
 void ha_client_stop() {
