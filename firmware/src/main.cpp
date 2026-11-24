@@ -305,6 +305,8 @@ static Config cfg;
 
 static const uint32_t WIFI_TRY_MS      = 15000;    // per saved network
 static const uint32_t AUTO_PORTAL_MS   = 90000;    // no saved WLAN reachable this long -> open the setup hotspot
+static const uint32_t SAVE_GRACE_MS    = 300000;   // after a fresh save: time to switch a phone hotspot back on
+static uint32_t auto_portal_ms         = AUTO_PORTAL_MS;
 static const uint32_t PORTAL_TIMEOUT_MS = 300000;  // a portal opened by hand closes itself
 static const uint32_t WIFI_LOST_MS     = 8000;     // RUNNING without WLAN this long -> reconnect logic
 
@@ -585,6 +587,7 @@ void loop() {
             storage_save(cfg);
             close_portal();
             offline_since = 0;
+            auto_portal_ms = SAVE_GRACE_MS;   // a phone hotspot was probably off while it was set up
             enter_connecting_wifi();
             return;
         }
@@ -605,6 +608,7 @@ void loop() {
             storage_save(cfg);
             close_portal();
             offline_since = 0;
+            auto_portal_ms = SAVE_GRACE_MS;
             enter_connecting_wifi();
         } else if (portal_cancel || (portal_manual && millis() - portal_opened > PORTAL_TIMEOUT_MS)) {
             close_portal();
@@ -618,9 +622,11 @@ void loop() {
             Serial.printf("[WIFI] Connected to '%s', IP: %s\n", WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
             if (portal_overlay) close_portal();
             offline_since = 0;
+            auto_portal_ms = AUTO_PORTAL_MS;
             enter_testing_ha();
         } else {
-            if (!portal_overlay && millis() - offline_since >= AUTO_PORTAL_MS) {
+            if (!portal_overlay && millis() - offline_since >= auto_portal_ms) {
+                auto_portal_ms = AUTO_PORTAL_MS;
                 open_portal_overlay(false);
             } else if (millis() - connect_start > WIFI_TRY_MS) {
                 // next saved network; after a full round without luck say so (not over the hotspot screen)

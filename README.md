@@ -178,7 +178,7 @@ Das Einrichtungsportal öffnet sich wieder:
 - **automatisch**, wenn 90 Sekunden lang kein gespeichertes WLAN erreichbar ist (das Display versucht es im Hintergrund weiter und schließt das Portal, sobald ein Netz wieder da ist),
 - **per langem Druck** (3 Sekunden) auf eine leere Stelle der Seite, also dort, wo kein bedienbares Element liegt. „Abbrechen“ oder 5 Minuten ohne Eingabe führen zurück in den Normalbetrieb.
 
-Im Portal (WLAN des Displays, Adresse `192.168.4.1`) lassen sich WLANs hinzufügen und entfernen sowie die HA-URL ändern. Details und Grenzen: [docs/wifi.md](docs/wifi.md).
+Im Portal (WLAN des Displays, Adresse `192.168.4.1`) lassen sich WLANs hinzufügen und entfernen sowie die HA-URL ändern. Den Netzwerknamen kannst du **frei eintippen**; das Netz muss nicht erreichbar sein. Das ist wichtig für einen **Handy-Hotspot**: Das iPhone schaltet ihn ab, sobald du dich mit dem Display verbindest. Name von Hand eintragen, speichern, Hotspot wieder einschalten (iPhone: Hotspot-Einstellungen geöffnet lassen, „Kompatibilität maximieren“ an, nur 2,4 GHz). Details und Grenzen: [docs/wifi.md](docs/wifi.md).
 
 ## Fehlersuche
 

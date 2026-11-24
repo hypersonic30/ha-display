@@ -71,14 +71,17 @@ button[type=submit]:disabled{opacity:.5;cursor:not-allowed}
 
   <div class="card">
     <h2>WLAN hinzufügen</h2>
-    <label>Netzwerk</label>
+    <label>Netzwerkname (SSID)</label>
     <div class="row">
-      <select id="ssid"><option value="">Suche läuft...</option></select>
+      <input id="ssid" list="nets" type="text" maxlength="32" placeholder="Name eintippen oder aus der Liste wählen" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+      <datalist id="nets"></datalist>
       <button type="button" class="scan-btn" onclick="scan()">&#8635;</button>
     </div>
+    <p class="hint" id="scanhint">Die Suche zeigt nur Netze in Reichweite. Versteckte oder gerade ausgeschaltete Netze (z. B. ein Handy-Hotspot) einfach selbst eintippen.</p>
     <label>Passwort</label>
     <input id="pw" type="password" placeholder="WLAN-Passwort (leer bei offenem WLAN)" autocomplete="off">
     <button type="button" class="add-btn" id="add" onclick="addNet()">Hinzufügen</button>
+    <p class="hint"><b>Handy-Hotspot:</b> Das Netz muss nicht jetzt erreichbar sein, es wird nur gespeichert. Beim iPhone schaltet sich der Hotspot ab, sobald du dich mit diesem Display-WLAN verbindest. Trag den Namen also von Hand ein, speichere, schalte danach den Hotspot wieder ein und lass dabei <i>Einstellungen &rarr; Persönlicher Hotspot</i> geöffnet. Aktiviere dort &bdquo;Kompatibilität maximieren&ldquo; (2,4 GHz), denn der ESP32 kann kein 5&nbsp;GHz. Das Display verbindet sich dann von selbst.</p>
   </div>
 
   <div class="card">
@@ -105,35 +108,37 @@ function render(){
   document.getElementById('list').innerHTML=nets.length?nets.map((n,i)=>
     '<div class="net"><span>'+esc(n.ssid)+(n.keep?'':' <small>(neu)</small>')+'</span><button type="button" class="del" onclick="delNet('+i+')">Entfernen</button></div>').join('')
     :'<p class="hint">Noch kein WLAN gespeichert.</p>';
-  document.getElementById('add').disabled=nets.length>=MAX&&!nets.some(n=>n.ssid===document.getElementById('ssid').value);
+  document.getElementById('add').disabled=nets.length>=MAX&&!nets.some(n=>n.ssid===document.getElementById('ssid').value.trim());
 }
 function delNet(i){nets.splice(i,1);render()}
 function addNet(){
-  const ssid=document.getElementById('ssid').value;
+  const box=document.getElementById('ssid');
+  const ssid=box.value.trim();
   const pw=document.getElementById('pw').value;
-  if(!ssid)return;
+  if(!ssid){status('Bitte einen Netzwerknamen eingeben','err');return}
+  if(new TextEncoder().encode(ssid).length>32){status('Netzwerkname: höchstens 32 Bytes','err');return}
   if(pw&&pw.length<8){status('WLAN-Passwort: mindestens 8 Zeichen','err');return}
   const n={ssid:ssid,password:pw,keep:false};
   const i=nets.findIndex(x=>x.ssid===ssid);
   if(i>=0)nets[i]=n;else if(nets.length<MAX)nets.push(n);else return;
-  document.getElementById('pw').value='';
+  document.getElementById('pw').value='';box.value='';
   status('','');document.getElementById('st').className='status';
   render();
 }
 
 async function scan(){
-  const sel=document.getElementById('ssid');
-  sel.innerHTML='<option>Suche...</option>';
+  const dl=document.getElementById('nets'),hint=document.getElementById('scanhint');
+  hint.textContent='Suche läuft...';
   try{
     const r=await fetch('/scan');
     const found=await r.json();
-    if(!found.length){sel.innerHTML='<option value="">Keine Netzwerke gefunden (nochmal suchen)</option>';return}
-    sel.innerHTML=found.map(n=>'<option value="'+esc(n.ssid)+'">'+esc(n.ssid)+' ('+n.rssi+' dBm)'+(n.open?' 🔓':'')+'</option>').join('');
-  }catch(e){sel.innerHTML='<option value="">Fehler beim Suchen</option>'}
+    dl.innerHTML=found.map(n=>'<option value="'+esc(n.ssid)+'">'+esc(n.ssid)+' ('+n.rssi+' dBm)'+(n.open?' offen':'')+'</option>').join('');
+    hint.textContent=found.length?found.length+' Netz(e) gefunden (ins Feld tippen zeigt die Liste). Nicht dabei? Einfach den Namen eintippen.':'Keine Netze gefunden. Du kannst den Namen trotzdem eintippen.';
+  }catch(e){hint.textContent='Suche fehlgeschlagen. Du kannst den Namen trotzdem eintippen.'}
   render();
 }
 
-document.getElementById('ssid').addEventListener('change',render);
+document.getElementById('ssid').addEventListener('input',render);
 
 document.getElementById('frm').addEventListener('submit',async e=>{
   e.preventDefault();
@@ -150,7 +155,7 @@ document.getElementById('frm').addEventListener('submit',async e=>{
     const r=await fetch('/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
     const j=await r.json();
     if(j.ok){
-      status('Gespeichert! Das Display verbindet sich jetzt.','ok');
+      status('Gespeichert. Das Display verbindet sich jetzt mit dem WLAN. Ist es ein Handy-Hotspot: jetzt wieder einschalten (Hotspot-Einstellungen geöffnet lassen), das Display verbindet sich von selbst.','ok');
     }else{
       status('Fehler: '+(j.error||'Unbekannt'),'err');
       btn.disabled=false;
@@ -248,6 +253,8 @@ static void handle_save() {
         const char *ssid = n["ssid"] | "";
         const char *pass = n["password"] | "";
         if (!ssid[0] || strlen(ssid) >= sizeof(next.wifi[0].ssid)) return fail("WLAN-Name ungültig");
+        for (const char *c = ssid; *c; c++)
+            if ((unsigned char)*c < 0x20 || *c == 0x7f) return fail("WLAN-Name ungültig");
         for (int i = 0; i < next.wifi_count; i++)
             if (strcmp(next.wifi[i].ssid, ssid) == 0) return fail("WLAN doppelt");
         WifiNet &w = next.wifi[next.wifi_count];

@@ -25,9 +25,27 @@ Es gibt zwei Wege dorthin:
 ## Die Seite
 
 - **Gespeicherte WLANs:** Liste mit „Entfernen“. Passwörter werden nie angezeigt.
-- **WLAN hinzufügen:** Netz aus der Suche wählen, Passwort eingeben, „Hinzufügen“ (höchstens 3; gleicher Name ersetzt
-  das Passwort).
+- **WLAN hinzufügen:** Name (SSID) **frei eintippen** oder aus der Suchliste wählen (ins Feld tippen zeigt die Liste),
+  Passwort eingeben (leer = offenes WLAN, sonst 8 bis 63 Zeichen), „Hinzufügen“ (höchstens 3; gleicher Name ersetzt
+  das Passwort). Der Name darf bis zu 32 Bytes lang sein. Versteckte Netze und Netze, die gerade nicht in Reichweite
+  sind, gehen so auch. Gespeichert wird ohne Verbindungsprobe.
 - **Home Assistant:** URL ist vorausgefüllt. Der Gerätecode wird nicht angezeigt: leer lassen behält ihn.
 - „Verbinden & Speichern“ übernimmt alles und verbindet sofort, ohne Neustart.
 
 Läuft der Hotspot gleichzeitig mit einem Verbindungsversuch, kann die Netzsuche kurz leer bleiben (nochmal auf ↻).
+
+## Handy-Hotspot (iPhone/Android)
+
+Ein iPhone schaltet seinen **Persönlichen Hotspot ab**, sobald du dich mit dem WLAN des Displays verbindest. Der
+Hotspot taucht deshalb auch nie in der Netzsuche auf. So geht es:
+
+1. Auf der Einrichtungsseite den Hotspot-Namen (SSID) und sein Passwort von Hand eintippen, „Hinzufügen“,
+   „Verbinden & Speichern“.
+2. Danach den Hotspot am Handy wieder einschalten. Beim iPhone *Einstellungen → Persönlicher Hotspot* geöffnet lassen
+   (sonst ist der Hotspot für andere Geräte oft nicht sichtbar) und **„Kompatibilität maximieren“** einschalten: der
+   ESP32 funkt nur auf 2,4 GHz.
+3. Das Display verbindet sich von selbst. Nach dem Speichern wartet es **5 Minuten** (statt 90 Sekunden), bevor es
+   seinen eigenen Hotspot wieder öffnet. So bleibt Zeit zum Umschalten, und das Handy hängt sich nicht wieder an das
+   Display-WLAN.
+
+Ist das Handy-WLAN später aus, öffnet das Display nach 90 Sekunden wieder sein Einrichtungs-WLAN.
