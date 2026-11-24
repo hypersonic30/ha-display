@@ -74,6 +74,38 @@ static void set_brightness(int percent) {
     ledcWrite(TFT_BL, percent * 255 / 100);
 }
 
+#ifdef DIAG_BUILD
+// Diagnostic builds only: print what the controller answers to its ID commands (MISO is shared with the touch
+// chip, so an all-0x00 / all-0xFF answer proves nothing) and paint colour bars so a working panel is obvious.
+static void diag_display() {
+    struct Q { uint8_t cmd; uint8_t n; const char *name; };
+    static const Q qs[] = {{0x04, 4, "RDDID 0x04"}, {0xD3, 4, "ID4 0xD3 (9341/9488)"}, {0xBF, 6, "ILI9481 0xBF"},
+                           {0xDA, 1, "ID1 0xDA"}, {0xDB, 1, "ID2 0xDB"}, {0xDC, 1, "ID3 0xDC"},
+                           {0x09, 5, "STATUS 0x09"}, {0x0A, 1, "POWER 0x0A"}, {0x0B, 1, "MADCTL 0x0B"},
+                           {0x0C, 1, "PIXFMT 0x0C"}};
+    Serial.printf("[DIAG] driver %s, SPI %u Hz, read %u Hz, panel %dx%d\n", FW_VARIANT, (unsigned)SPI_FREQUENCY,
+                  (unsigned)SPI_READ_FREQUENCY, tft.width(), tft.height());
+    for (const Q &q : qs) {
+        Serial.printf("[DIAG] %-22s:", q.name);
+        for (uint8_t i = 0; i < q.n; i++) Serial.printf(" %02X", tft.readcommand8(q.cmd, i));
+        Serial.println();
+    }
+    Serial.println("[DIAG] read: 0xBF -> 'xx 02 04 94 81 xx' = ILI9481 | 0xD3 -> '00 00 94 88' = ILI9488 | "
+                   "0x04 or 0xD3 containing 77 96 = ST7796 | '00 93 41' = ILI9341 | 94 86 = ILI9486");
+    Serial.println("[DIAG] all 00 or all FF = no answer (MISO not wired to the panel, or the panel ignores reads): "
+                   "that is normal for many SPI modules; judge by the colour bars");
+    static const struct { uint16_t c; const char *n; } bars[] = {{TFT_RED, "red"}, {TFT_GREEN, "green"},
+                                                                  {TFT_BLUE, "blue"}, {TFT_WHITE, "white"}};
+    for (const auto &b : bars) {
+        Serial.printf("[DIAG] bar %s\n", b.n);
+        tft.fillScreen(b.c);
+        delay(1000);
+    }
+    tft.fillScreen(TFT_BLACK);
+    Serial.println("[DIAG] bars done: expected red, green, blue, white. Other colours = colour order/inversion.");
+}
+#endif
+
 static void tft_init() {
     cur_rotation = storage_load_rotation();
     tft.begin();
@@ -81,6 +113,9 @@ static void tft_init() {
     tft.fillScreen(TFT_BLACK);
     ledcAttach(TFT_BL, 5000, 8);
     set_brightness(DEFAULT_BRIGHTNESS);
+#ifdef DIAG_BUILD
+    diag_display();
+#endif
 }
 
 // Held for HOLD_MS right after power-up: calibrate the touch of the current rotation again.

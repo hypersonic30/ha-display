@@ -11,3 +11,6 @@ firmware/.pio/
 .pytest_cache/
 htmlcov/
 .coverage
+
+# diagnostic firmware images
+firmware/diag/
