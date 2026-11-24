@@ -13,6 +13,28 @@ Selbstgebautes Touch-Panel (ESP32 + ILI9488 480×320) für Home Assistant. Das L
 - **Live-Werte** und **Touch-Bedienung** (Taster, Schalter, Schieber, Medien, Thermostat) direkt am Display
 - Alles aus einem Repository, Installation über **HACS**
 
+## Screenshots
+
+So sehen drei Seiten eines Displays aus (Demo-Layout, Darstellung wie im Editor):
+
+![Drei Display-Seiten: Wohnzimmer, Medien, Klima](docs/img/display-pages.png)
+
+Der Editor als Lovelace-Karte – Elemente aus der Palette links ziehen, rechts die Eigenschaften einstellen:
+
+![Layout-Editor als Lovelace-Karte](docs/img/editor-card.png)
+
+Eigenschaften eines Elements: Entität, Beschriftung, Symbol, Schriftgröße, Farben (aus/an), Position und Größe.
+
+![Eigenschaften eines Tasters](docs/img/widget-properties.png)
+
+Der Editor als eigener Eintrag in der Seitenleiste:
+
+![Editor in der Seitenleiste](docs/img/sidebar-panel.png)
+
+Jedes Display ist ein Gerät der Integration:
+
+![Integration mit einem Display-Gerät](docs/img/integration.png)
+
 ## Hardware
 
 | Bauteil | Wert |
