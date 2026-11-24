@@ -40,10 +40,10 @@ Jedes Display ist ein Gerät der Integration:
 | Bauteil | Wert |
 |---|---|
 | MCU | ESP32-WROOM-32D |
-| Display | ILI9488 **oder** ILI9481, 480×320, SPI |
+| Display | ILI9481, ILI9488, ILI9486 oder ST7796, 480×320, SPI |
 | Touch | XPT2046 |
 
-Pinbelegung (wie im Schaltplan):
+Pinbelegung der Voreinstellung (wie im Schaltplan):
 
 | Signal | GPIO | Signal | GPIO |
 |---|---|---|---|
@@ -52,7 +52,10 @@ Pinbelegung (wie im Schaltplan):
 | MISO | 19 | TFT RST | 4 |
 | Touch CS | 14 | Backlight (TFT_LED) | **32** |
 
-T_IRQ (IO27) und der Piezo-Treiber (IO26) werden von der Firmware nicht genutzt.
+Controller, Pins, SPI-Takt, Backlight und Touch lassen sich seit 0.7.0 **im Einrichtungsportal des
+Displays** ändern (Bereich „Hardware“), ohne neu zu flashen, inklusive Display-Test und Rückweg zu den
+Standardwerten: siehe [docs/hardware.md](docs/hardware.md). T_IRQ (IO27) und der Piezo-Treiber (IO26) nutzt
+die Firmware standardmäßig nicht.
 
 ## Installation
 
@@ -179,6 +182,25 @@ Das Einrichtungsportal öffnet sich wieder:
 - **per langem Druck** (3 Sekunden) auf eine leere Stelle der Seite, also dort, wo kein bedienbares Element liegt. „Abbrechen“ oder 5 Minuten ohne Eingabe führen zurück in den Normalbetrieb.
 
 Im Portal (WLAN des Displays, Adresse `192.168.4.1`) lassen sich WLANs hinzufügen und entfernen sowie die HA-URL ändern. Den Netzwerknamen kannst du **frei eintippen**; das Netz muss nicht erreichbar sein. Das ist wichtig für einen **Handy-Hotspot**: Das iPhone schaltet ihn ab, sobald du dich mit dem Display verbindest. Name von Hand eintragen, speichern, Hotspot wieder einschalten (iPhone: Hotspot-Einstellungen geöffnet lassen, „Kompatibilität maximieren“ an, nur 2,4 GHz). Details und Grenzen: [docs/wifi.md](docs/wifi.md).
+
+## HTTPS und Zertifikatsprüfung
+
+Als Home-Assistant-Adresse sind `http://` und `https://` möglich. Bei `https://` prüft das Display ab 0.7.0
+standardmäßig das **Zertifikat** gegen die gängigen Zertifizierungsstellen (Mozilla-Liste, wie im Browser) und
+den **Rechnernamen**. Die Adresse muss dazu ein Name sein (z. B. von Nabu Casa, DuckDNS oder deiner Domain),
+mit einer IP-Adresse passt ein Zertifikat in der Regel nicht.
+
+- Für ein **selbst signiertes** Zertifikat im Heimnetz im Portal „Zertifikat prüfen“ ausschalten: die
+  Verbindung bleibt verschlüsselt, wird aber nicht gegen Abfangen geschützt.
+- Die Prüfung braucht die **Uhrzeit**, denn ein Zertifikat gilt nur in einem Zeitfenster. Das Display holt sie per
+  NTP (`pool.ntp.org`, UDP 123). Ist das gesperrt, liest es sie ersatzweise aus dem `Date`-Kopf der Antwort von
+  Home Assistant (nur zum Stellen der Uhr, die eigentliche Verbindung wird danach geprüft). Gelingt beides, zeigt
+  das Display „Uhrzeit nicht verfügbar“.
+- Kosten: etwa 70 KB Flash für die Zertifikatsliste; beim Verbindungsaufbau kurz etwas mehr Arbeitsspeicher. Die
+  freien Heap-Werte stehen im seriellen Log (`[TLS] heap ...`).
+
+Unterwegs mit einem Handy-Hotspot erreicht das Display nur dann Home Assistant, wenn die Adresse von außen
+erreichbar ist: bei iOS läuft der Verkehr von Geräten am Persönlichen Hotspot **nicht** durch das VPN des Handys.
 
 ## Fehlersuche
 

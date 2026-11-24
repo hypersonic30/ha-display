@@ -1,6 +1,5 @@
 #include <Arduino.h>
 #include <WiFi.h>
-#include <TFT_eSPI.h>
 #include <lvgl.h>
 
 #include "storage.h"
@@ -10,13 +9,15 @@
 #include "widgets.h"
 #include "ota.h"
 #include "tls.h"
+#include "display.h"
+#include "hw.h"
 
 // ── Display, touch & LVGL ─────────────────────────────────────────────────────
 
 static const int DEFAULT_BRIGHTNESS = 86;   // percent, until the layout says otherwise
 static const uint32_t HOLD_MS       = 3000;
 
-TFT_eSPI tft = TFT_eSPI();
+static HwConfig hw_cfg;
 static lv_disp_draw_buf_t draw_buf;
 static lv_color_t         buf[LV_HOR_RES_MAX * 32];   // fits 480x32 as well as 320x48 lines
 static lv_disp_drv_t      disp_drv;
@@ -30,25 +31,17 @@ static bool     press_moved = false;        // the finger travelled: a drag, not
 // Screen rotation 0..3 (0 = landscape 480x320, 1 = portrait 320x480, ...). The layout decides it.
 static int  cur_rotation     = 0;
 static bool calibrate_pending = false;   // set inside a callback, done from loop()
-static bool touch_uncalibrated = false;  // running on default data, nothing stored for this rotation yet
+static bool touch_uncalibrated = false;  // running on default data, nothing stored yet
 static bool calibration_offered = false; // the one automatic offer per boot has been made
 
-static int tft_rotation(int r) { return (1 + r) % 4; }   // 0 = the original TFT_eSPI rotation 1
-
 static void disp_flush(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *color_p) {
-    tft.startWrite();
-    tft.setAddrWindow(area->x1, area->y1,
-                      area->x2 - area->x1 + 1,
-                      area->y2 - area->y1 + 1);
-    tft.pushColors((uint16_t *)&color_p->full,
-                   (area->x2 - area->x1 + 1) * (area->y2 - area->y1 + 1), true);
-    tft.endWrite();
+    display_flush(area->x1, area->y1, area->x2, area->y2, (const uint16_t *)&color_p->full);
     lv_disp_flush_ready(drv);
 }
 
 static void touch_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {
     uint16_t x, y;
-    if (tft.getTouch(&x, &y)) {
+    if (display_touch(x, y)) {
         touch_x = x;
         touch_y = y;
         if (!press_since) {
@@ -70,64 +63,26 @@ static uint32_t touch_hold_ms() {
     return press_since ? millis() - press_since : 0;
 }
 
-static void set_brightness(int percent) {
-    percent = constrain(percent, 1, 100);
-    ledcWrite(TFT_BL, percent * 255 / 100);
-}
-
-#ifdef DIAG_BUILD
-// Diagnostic builds only: print what the controller answers to its ID commands (MISO is shared with the touch
-// chip, so an all-0x00 / all-0xFF answer proves nothing) and paint colour bars so a working panel is obvious.
-static void diag_display() {
-    struct Q { uint8_t cmd; uint8_t n; const char *name; };
-    static const Q qs[] = {{0x04, 4, "RDDID 0x04"}, {0xD3, 4, "ID4 0xD3 (9341/9488)"}, {0xBF, 6, "ILI9481 0xBF"},
-                           {0xDA, 1, "ID1 0xDA"}, {0xDB, 1, "ID2 0xDB"}, {0xDC, 1, "ID3 0xDC"},
-                           {0x09, 5, "STATUS 0x09"}, {0x0A, 1, "POWER 0x0A"}, {0x0B, 1, "MADCTL 0x0B"},
-                           {0x0C, 1, "PIXFMT 0x0C"}};
-    Serial.printf("[DIAG] driver %s, SPI %u Hz, read %u Hz, panel %dx%d\n", FW_VARIANT, (unsigned)SPI_FREQUENCY,
-                  (unsigned)SPI_READ_FREQUENCY, tft.width(), tft.height());
-    for (const Q &q : qs) {
-        Serial.printf("[DIAG] %-22s:", q.name);
-        for (uint8_t i = 0; i < q.n; i++) Serial.printf(" %02X", tft.readcommand8(q.cmd, i));
-        Serial.println();
-    }
-    Serial.println("[DIAG] read: 0xBF -> 'xx 02 04 94 81 xx' = ILI9481 | 0xD3 -> '00 00 94 88' = ILI9488 | "
-                   "0x04 or 0xD3 containing 77 96 = ST7796 | '00 93 41' = ILI9341 | 94 86 = ILI9486");
-    Serial.println("[DIAG] all 00 or all FF = no answer (MISO not wired to the panel, or the panel ignores reads): "
-                   "that is normal for many SPI modules; judge by the colour bars");
-    static const struct { uint16_t c; const char *n; } bars[] = {{TFT_RED, "red"}, {TFT_GREEN, "green"},
-                                                                  {TFT_BLUE, "blue"}, {TFT_WHITE, "white"}};
-    for (const auto &b : bars) {
-        Serial.printf("[DIAG] bar %s\n", b.n);
-        tft.fillScreen(b.c);
-        delay(1000);
-    }
-    tft.fillScreen(TFT_BLACK);
-    Serial.println("[DIAG] bars done: expected red, green, blue, white. Other colours = colour order/inversion.");
-}
-#endif
+static void set_brightness(int percent) { display_set_brightness(percent); }
 
 static void tft_init() {
     cur_rotation = storage_load_rotation();
-    tft.begin();
-    tft.setRotation(tft_rotation(cur_rotation));
-    tft.fillScreen(TFT_BLACK);
-    ledcAttach(TFT_BL, 5000, 8);
+    display_begin(hw_cfg);
+    display_set_rotation(cur_rotation);
+    display_fill_black();
     set_brightness(DEFAULT_BRIGHTNESS);
-#ifdef DIAG_BUILD
-    diag_display();
-#endif
+    display_print_ids();
 }
 
-// Held for HOLD_MS right after power-up: calibrate the touch of the current rotation again.
+// Held for HOLD_MS right after power-up: calibrate the touch again.
 static bool boot_hold_requested() {
-    tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
-    tft.drawCentreString("Touch 3 s halten: Touch neu kalibrieren", tft.width() / 2, tft.height() / 2 - 10, 2);
+    display_text_centered("Touch 3 s halten: Touch neu kalibrieren", display_width() / 2, display_height() / 2 - 10, 1, true);
 
     uint32_t t0 = millis(), held = 0;
     uint16_t x, y;
     while (millis() - t0 < HOLD_MS + 1000) {
-        if (tft.getTouch(&x, &y)) {
+        hw_guard_poll();
+        if (display_touch(x, y)) {
             if (!held) held = millis();
             if (millis() - held >= HOLD_MS) return true;
         } else if (held) {
@@ -140,112 +95,40 @@ static bool boot_hold_requested() {
     return false;
 }
 
-// Rough XPT2046 data per rotation (TFT_eSPI example values for 480x320, flipped for the 180 degree
-// rotations). Good enough to hit big targets; a real calibration replaces them.
-static void default_touch_cal(int r, uint16_t cal[5]) {
-    static const uint16_t base[2][5] = {
-        {275, 3620, 264, 3532, 1},   // landscape: axes swapped
-        {300, 3600, 300, 3600, 0},   // portrait
-    };
-    const uint16_t *b = base[r & 1];
-    for (int i = 0; i < 4; i++) cal[i] = b[i];
-    cal[4] = b[4] | ((r & 2) ? 6 : 0);   // rotations 2 and 3: both axes inverted
-}
-
-// Touch pressure above this counts as a press (TFT_eSPI uses Z_THRESHOLD/2 for the corners as well).
-static const uint16_t CAL_Z = 175;
-
-// Corner markers like TFT_eSPI::calibrateTouch (same maths) but with a deadline: returns false if nobody
-// touches within `timeout_ms` of the start (display blank / no touch), so a dead panel never blocks boot.
-static bool calibrate_corners(uint16_t cal[5], uint32_t timeout_ms) {
-    const uint8_t size = 15;
-    const int16_t w = tft.width(), h = tft.height();
-    const uint32_t deadline = millis() + timeout_ms;
-    int32_t v[8] = {0, 0, 0, 0, 0, 0, 0, 0};
-
-    for (uint8_t i = 0; i < 4; i++) {
-        tft.fillRect(0, 0, size + 1, size + 1, TFT_BLACK);
-        tft.fillRect(0, h - size - 1, size + 1, size + 1, TFT_BLACK);
-        tft.fillRect(w - size - 1, 0, size + 1, size + 1, TFT_BLACK);
-        tft.fillRect(w - size - 1, h - size - 1, size + 1, size + 1, TFT_BLACK);
-        int16_t cx = (i == 2 || i == 3) ? w - 1 : 0, cy = (i == 1 || i == 3) ? h - 1 : 0;
-        int16_t dx = cx ? -size : size, dy = cy ? -size : size;
-        tft.drawLine(cx, cy, cx + dx, cy, TFT_MAGENTA);
-        tft.drawLine(cx, cy, cx, cy + dy, TFT_MAGENTA);
-        tft.drawLine(cx, cy, cx + dx, cy + dy, TFT_MAGENTA);
-
-        if (i > 0) delay(1000);   // give the finger time to leave the previous corner
-        for (uint8_t j = 0; j < 8; j++) {
-            for (;;) {
-                if (millis() > deadline) return false;
-                if (tft.getTouchRawZ() > CAL_Z) break;
-                delay(5);
-            }
-            delay(10);
-            uint16_t x, y;
-            tft.getTouchRaw(&x, &y);
-            v[i * 2] += x; v[i * 2 + 1] += y;
-            delay(10);
-        }
-        v[i * 2] /= 8; v[i * 2 + 1] /= 8;
-    }
-
-    bool rotate = abs(v[0] - v[2]) > abs(v[1] - v[3]);
-    int32_t x0, x1, y0, y1;
-    if (rotate) { x0 = (v[1] + v[3]) / 2; x1 = (v[5] + v[7]) / 2; y0 = (v[0] + v[4]) / 2; y1 = (v[2] + v[6]) / 2; }
-    else        { x0 = (v[0] + v[2]) / 2; x1 = (v[4] + v[6]) / 2; y0 = (v[1] + v[5]) / 2; y1 = (v[3] + v[7]) / 2; }
-    bool inv_x = false, inv_y = false;
-    if (x0 > x1) { int32_t t = x0; x0 = x1; x1 = t; inv_x = true; }
-    if (y0 > y1) { int32_t t = y0; y0 = y1; y1 = t; inv_y = true; }
-    x1 -= x0; y1 -= y0;
-    if (x0 == 0) x0 = 1;
-    if (x1 == 0) x1 = 1;
-    if (y0 == 0) y0 = 1;
-    if (y1 == 0) y1 = 1;
-    cal[0] = x0; cal[1] = x1; cal[2] = y0; cal[3] = y1;
-    cal[4] = (rotate ? 1 : 0) | (inv_x ? 2 : 0) | (inv_y ? 4 : 0);
-    return true;
-}
-
-// Blocking for at most about a minute: corner markers, then store the result for the current rotation. The
-// XPT2046 mapping differs per rotation, so each of the four has its own data. Without any touch it gives
-// up, keeps the default data and does not store anything (the next boot offers it again).
+// Blocking for at most about a minute: corner markers, then store the result (it is the same for every
+// rotation). Without any touch it gives up, keeps the default data and does not store anything (the next boot
+// offers it again).
 static void run_calibration() {
-    uint16_t cal[5];
+    uint16_t cal[8];
     Serial.println("[TOUCH] calibration started");
-    tft.fillScreen(TFT_BLACK);
-    tft.setTextColor(TFT_WHITE, TFT_BLACK);
-    tft.drawCentreString("Touch kalibrieren", tft.width() / 2, tft.height() / 2 - 24, 4);
-    tft.drawCentreString("Markierungen an den Ecken antippen", tft.width() / 2, tft.height() / 2 + 16, 2);
+    display_fill_black();
+    display_text_centered("Touch kalibrieren", display_width() / 2, display_height() / 2 - 24, 2, false);
+    display_text_centered("Markierungen an den Ecken antippen", display_width() / 2, display_height() / 2 + 16, 1, false);
     delay(1500);
-    if (calibrate_corners(cal, 60000)) {
-        storage_save_touch(cur_rotation, cal);
-        tft.setTouch(cal);
+    if (display_calibrate(cal, 60000)) {
+        storage_save_touch(cal);
         touch_uncalibrated = false;
         Serial.println("[TOUCH] calibration stored");
     } else {
-        default_touch_cal(cur_rotation, cal);
-        tft.setTouch(cal);
-        Serial.println("[TOUCH] no touch within 60 s, keeping default data");
+        Serial.println("[TOUCH] no touch within 60 s, keeping the current data");
     }
-    tft.fillScreen(TFT_BLACK);
+    display_fill_black();
     press_since = 0;
 }
 
 // Never blocks without a user action: no stored data means default data and the normal start; the
 // calibration is offered later (see loop()). Holding the screen at power-up still forces it.
 static void touch_init() {
-    uint16_t cal[5];
-    bool have = storage_load_touch(cur_rotation, cal);
-    if (!have) {
-        default_touch_cal(cur_rotation, cal);
+    uint16_t cal[8];
+    if (storage_load_touch(cal)) {
+        display_apply_calibration(cal);
+    } else {
         touch_uncalibrated = true;
         Serial.println("[TOUCH] no stored calibration, using defaults");
     }
-    tft.setTouch(cal);
 
-    if (boot_hold_requested()) run_calibration();
-    tft.fillScreen(TFT_BLACK);
+    if (hw_cfg.touch_on && boot_hold_requested()) run_calibration();
+    display_fill_black();
 }
 
 static void lvgl_init() {
@@ -253,8 +136,8 @@ static void lvgl_init() {
     lv_disp_draw_buf_init(&draw_buf, buf, NULL, LV_HOR_RES_MAX * 32);
 
     lv_disp_drv_init(&disp_drv);
-    disp_drv.hor_res  = tft.width();
-    disp_drv.ver_res  = tft.height();
+    disp_drv.hor_res  = display_width();
+    disp_drv.ver_res  = display_height();
     disp_drv.flush_cb = disp_flush;
     disp_drv.draw_buf = &draw_buf;
     disp = lv_disp_drv_register(&disp_drv);
@@ -270,22 +153,13 @@ static void lvgl_init() {
 static void apply_rotation(int r) {
     cur_rotation = r;
     storage_save_rotation(r);
-    tft.setRotation(tft_rotation(r));
-    disp_drv.hor_res = tft.width();
-    disp_drv.ver_res = tft.height();
+    display_set_rotation(r);
+    disp_drv.hor_res = display_width();
+    disp_drv.ver_res = display_height();
     lv_disp_drv_update(disp, &disp_drv);
-
-    uint16_t cal[5];
-    if (storage_load_touch(r, cal)) { tft.setTouch(cal); touch_uncalibrated = false; }
-    else {
-        default_touch_cal(r, cal);
-        tft.setTouch(cal);                  // usable until the calibration below has run
-        touch_uncalibrated = true;
-        calibrate_pending = true;           // from loop(): not inside a WebSocket callback
-    }
-    tft.fillScreen(TFT_BLACK);
+    display_fill_black();
     press_since = 0;
-    Serial.printf("[UI] rotation %d (%dx%d)\n", r, (int)tft.width(), (int)tft.height());
+    Serial.printf("[UI] rotation %d (%dx%d)\n", r, display_width(), display_height());
 }
 
 // ── AP SSID ───────────────────────────────────────────────────────────────────
@@ -470,6 +344,8 @@ static void on_layout(JsonObjectConst ev) {
         built_rev  = rev;
         built_page = page;
         status_screen = (n == 0);
+        Serial.printf("[UI] page built: %d widgets, free heap %u, largest block %u, minimum since boot %u\n", n,
+                      (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap(), (unsigned)ESP.getMinFreeHeap());
     }
 }
 
@@ -525,18 +401,24 @@ void setup() {
     delay(50);
     Serial.printf("\n[BOOT] ha-display fw %s (%s), reset reason %d, free heap %u\n", FW_VERSION, FW_VARIANT,
                   (int)esp_reset_reason(), (unsigned)ESP.getFreeHeap());
-    Serial.printf("[BOOT] TFT pins MOSI=%d SCLK=%d MISO=%d CS=%d DC=%d RST=%d BL=%d, touch CS=%d\n",
-                  TFT_MOSI, TFT_SCLK, TFT_MISO, TFT_CS, TFT_DC, TFT_RST, TFT_BL, TOUCH_CS);
+    bool hw_dropped = hw_guard_boot();   // crash-loop recovery bookkeeping, may drop a bad hardware config
+    bool hw_stored  = hw_load(hw_cfg);
+    Serial.printf("[BOOT] hardware configuration: %s%s\n", hw_stored ? "stored" : "defaults",
+                  hw_dropped ? " (reset after repeated crashes)" : "");
+    hw_print(hw_cfg);
     Serial.println("[BOOT] stage: ota check");
     ota_boot_check();   // a new image that keeps failing is rolled back before it can do more harm
     Serial.println("[BOOT] stage: display");
     tft_init();
+    hw_guard_poll();
     Serial.println("[BOOT] stage: touch");
     touch_init();
+    hw_guard_poll();
     Serial.println("[BOOT] stage: lvgl");
     lvgl_init();
     Serial.println("[BOOT] stage: ui");
     ui_init();
+    hw_guard_poll();
     build_ap_ssid();
     Serial.println("[BOOT] stage: storage");
 
@@ -552,6 +434,7 @@ void setup() {
 // ── Loop ──────────────────────────────────────────────────────────────────────
 
 void loop() {
+    hw_guard_poll();
     // First boot without stored touch data: offer the calibration once, but only when the panel is up and
     // talking to Home Assistant (never while the hotspot, OTA or a connection attempt needs the device).
     if (touch_uncalibrated && !calibration_offered && state == RUNNING && !portal_overlay && !ota_running() &&

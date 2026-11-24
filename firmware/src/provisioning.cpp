@@ -3,6 +3,9 @@
 #include <WebServer.h>
 #include <DNSServer.h>
 #include <ArduinoJson.h>
+#include <lvgl.h>
+#include "hw.h"
+#include "display.h"
 
 static WebServer  server(80);
 static DNSServer  dns;
@@ -58,6 +61,12 @@ label.chk input{width:auto}
 .add-btn:disabled{opacity:.5;cursor:not-allowed}
 .spinner{display:inline-block;width:16px;height:16px;border:2px solid #fff3;border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;vertical-align:middle;margin-right:8px}
 @keyframes spin{to{transform:rotate(360deg)}}
+details.card summary{cursor:pointer;color:var(--accent);font-size:1rem}
+details.card[open] summary{margin-bottom:12px}
+.hint.warn{color:#ffb74d}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
+.add-btn+.add-btn{margin-top:8px}
+
 </style>
 </head>
 <body>
@@ -101,6 +110,37 @@ label.chk input{width:auto}
   <div class="status" id="st"></div>
 </form>
 
+<details class="card" id="hwbox">
+  <summary class="hwsum">Hardware (Display &amp; Touch) &ndash; nur bei Bedarf</summary>
+  <p class="hint warn">Falsche Werte lassen das Display schwarz. Das Einrichtungs-WLAN funktioniert trotzdem. Zurück zu den Standardwerten: unten &bdquo;Auf Standard zurücksetzen&ldquo;, oder die BOOT-Taste in den ersten 30 Sekunden nach dem Einschalten 3 Sekunden halten. Nach drei Abstürzen direkt nach dem Start werden die Standardwerte ebenfalls wiederhergestellt.</p>
+  <label>Display-Controller</label>
+  <select id="hw_panel"></select>
+  <div class="grid">
+    <div><label>MOSI (SDI)</label><input id="hw_mosi" type="number" min="0" max="39"></div>
+    <div><label>SCLK (SCK)</label><input id="hw_sclk" type="number" min="0" max="39"></div>
+    <div><label>MISO (SDO)</label><input id="hw_miso" type="number" min="0" max="39"></div>
+    <div><label>CS</label><input id="hw_cs" type="number" min="0" max="39"></div>
+    <div><label>DC (RS)</label><input id="hw_dc" type="number" min="0" max="39"></div>
+    <div><label>RESET (-1 = keiner)</label><input id="hw_rst" type="number" min="-1" max="39"></div>
+    <div><label>Backlight (-1 = keiner)</label><input id="hw_bl" type="number" min="-1" max="39"></div>
+    <div><label>Schreibtakt (MHz)</label><input id="hw_write_mhz" type="number" min="1" max="40"></div>
+    <div><label>Lesetakt (MHz)</label><input id="hw_read_mhz" type="number" min="1" max="20"></div>
+  </div>
+  <p class="hint">Der Takt ist bei langen, parallelen Leiterbahnen oft entscheidend: Bleibt das Bild schwarz oder zeigt Streifen, erst einen niedrigeren Schreibtakt probieren.</p>
+  <label class="chk"><input type="checkbox" id="hw_bl_invert"> Backlight ist bei LOW an</label>
+  <label class="chk"><input type="checkbox" id="hw_bgr"> Farbreihenfolge BGR (Rot/Blau vertauscht &rarr; umschalten)</label>
+  <label class="chk"><input type="checkbox" id="hw_invert"> Farben invertieren (wie ein Negativ &rarr; umschalten)</label>
+  <label class="chk"><input type="checkbox" id="hw_touch_on"> Touch (XPT2046) vorhanden</label>
+  <div class="grid">
+    <div><label>Touch-CS</label><input id="hw_touch_cs" type="number" min="0" max="39"></div>
+    <div><label>Touch-IRQ (-1 = nicht anschließen)</label><input id="hw_touch_irq" type="number" min="-1" max="39"></div>
+  </div>
+  <button type="button" class="add-btn" onclick="hwTest()">Display-Test (Farbflächen)</button>
+  <button type="button" class="add-btn" onclick="hwSave()">Hardware speichern &amp; neu starten</button>
+  <button type="button" class="add-btn" onclick="hwReset()">Auf Standard zurücksetzen</button>
+  <div class="status" id="hwst"></div>
+</details>
+
 <script>
 const MAX=3;
 let nets=[],hasKey=false;
@@ -140,6 +180,60 @@ async function scan(){
     hint.textContent=found.length?found.length+' Netz(e) gefunden (ins Feld tippen zeigt die Liste). Nicht dabei? Einfach den Namen eintippen.':'Keine Netze gefunden. Du kannst den Namen trotzdem eintippen.';
   }catch(e){hint.textContent='Suche fehlgeschlagen. Du kannst den Namen trotzdem eintippen.'}
   render();
+}
+
+
+const HWPINS=['mosi','sclk','miso','cs','dc','rst','bl','write_mhz','read_mhz','touch_cs','touch_irq'];
+const HWFLAGS=['bl_invert','bgr','invert','touch_on'];
+let hwPresets=[];
+function hwStatus(msg,cls){const e=document.getElementById('hwst');e.className='status '+cls;e.innerHTML=msg}
+function hwFill(c){
+  document.getElementById('hw_panel').value=c.panel;
+  HWPINS.forEach(k=>document.getElementById('hw_'+k).value=c[k]);
+  HWFLAGS.forEach(k=>document.getElementById('hw_'+k).checked=!!c[k]);
+}
+function hwRead(){
+  const c={panel:+document.getElementById('hw_panel').value};
+  HWPINS.forEach(k=>c[k]=parseInt(document.getElementById('hw_'+k).value,10));
+  HWFLAGS.forEach(k=>c[k]=document.getElementById('hw_'+k).checked?1:0);
+  return c;
+}
+async function hwInit(){
+  try{
+    const j=await (await fetch('/hw')).json();
+    const sel=document.getElementById('hw_panel');
+    sel.innerHTML=j.names.map((n,i)=>'<option value="'+i+'">'+esc(n)+'</option>').join('');
+    hwPresets=j.presets;
+    hwFill(j.cfg);
+    sel.addEventListener('change',()=>{
+      const p=hwPresets[+sel.value];
+      if(p){document.getElementById('hw_write_mhz').value=p.write_mhz;document.getElementById('hw_read_mhz').value=p.read_mhz;
+        document.getElementById('hw_invert').checked=!!p.invert;document.getElementById('hw_bgr').checked=!!p.bgr}
+    });
+  }catch(e){}
+}
+async function hwPost(url,body,msg){
+  hwStatus('<span class="spinner"></span>'+msg,'info');
+  try{
+    const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
+    const j=await r.json();
+    if(j.ok)return j;
+    hwStatus('Fehler: '+(j.error||'Unbekannt'),'err');
+  }catch(e){hwStatus('Keine Antwort von der Firmware (startet sie gerade neu?)','err')}
+  return null;
+}
+async function hwSave(){
+  const j=await hwPost('/hw',hwRead(),'Speichere...');
+  if(j)hwStatus('Gespeichert. Das Display startet jetzt neu und nutzt die neuen Werte. Danach diese Seite neu laden.','ok');
+}
+async function hwReset(){
+  if(!confirm('Hardware-Einstellungen auf Standard zurücksetzen? Das Display startet neu.'))return;
+  const j=await hwPost('/hw/reset',{},'Setze zurück...');
+  if(j)hwStatus('Standardwerte gesetzt. Das Display startet neu.','ok');
+}
+async function hwTest(){
+  const j=await hwPost('/hw/test',{},'Test läuft: Rot, Grün, Blau, Weiß ...');
+  if(j)hwStatus('Test beendet. Erwartet: Rot, Grün, Blau, Weiß. Andere Farben: Farbreihenfolge oder Invertierung umschalten. Nichts zu sehen: niedrigeren Schreibtakt oder anderen Controller probieren. Die Controller-ID steht im seriellen Log.','ok');
 }
 
 document.getElementById('ssid').addEventListener('input',render);
@@ -186,6 +280,7 @@ document.getElementById('frm').addEventListener('submit',async e=>{
   if(hasKey&&!q.get('key')){k.required=false;document.getElementById('keyhint').textContent='Gespeichert. Leer lassen, um den Gerätecode zu behalten.'}
   else k.required=true;
   render();
+  hwInit();
   scan();
 })();
 </script>
@@ -298,6 +393,74 @@ static void handle_save() {
     send_json(200, "{\"ok\":true}");
 }
 
+
+// ── Hardware (display / touch) ────────────────────────────────────────────────
+
+static void hw_to_json(const HwConfig &c, JsonObject o) {
+    o["panel"] = c.panel;
+    o["mosi"] = c.mosi; o["sclk"] = c.sclk; o["miso"] = c.miso;
+    o["cs"] = c.cs; o["dc"] = c.dc; o["rst"] = c.rst; o["bl"] = c.bl;
+    o["bl_invert"] = c.bl_invert; o["write_mhz"] = c.write_mhz; o["read_mhz"] = c.read_mhz;
+    o["touch_on"] = c.touch_on; o["touch_cs"] = c.touch_cs; o["touch_irq"] = c.touch_irq;
+    o["bgr"] = c.bgr; o["invert"] = c.invert;
+}
+
+static void handle_hw_get() {
+    JsonDocument doc;
+    HwConfig c;
+    hw_load(c);
+    hw_to_json(c, doc["cfg"].to<JsonObject>());
+    JsonArray names = doc["names"].to<JsonArray>();
+    JsonArray presets = doc["presets"].to<JsonArray>();
+    for (uint8_t i = 0; i < PANEL_COUNT; i++) {
+        names.add(hw_panel_name(i));
+        HwConfig p = c;
+        hw_preset(p, i);
+        JsonObject o = presets.add<JsonObject>();
+        o["write_mhz"] = p.write_mhz; o["read_mhz"] = p.read_mhz; o["invert"] = p.invert; o["bgr"] = p.bgr;
+    }
+    String out;
+    serializeJson(doc, out);
+    send_json(200, out.c_str());
+}
+
+static void handle_hw_save() {
+    if (!server.hasArg("plain")) return fail("no body");
+    JsonDocument doc;
+    if (deserializeJson(doc, server.arg("plain"))) return fail("invalid json");
+    HwConfig c;
+    hw_defaults(c);
+    c.panel     = doc["panel"] | c.panel;
+    c.mosi      = doc["mosi"] | c.mosi;   c.sclk = doc["sclk"] | c.sclk;   c.miso = doc["miso"] | c.miso;
+    c.cs        = doc["cs"] | c.cs;       c.dc   = doc["dc"] | c.dc;       c.rst  = doc["rst"] | c.rst;
+    c.bl        = doc["bl"] | c.bl;
+    c.bl_invert = doc["bl_invert"] | c.bl_invert;
+    c.write_mhz = doc["write_mhz"] | c.write_mhz;   c.read_mhz = doc["read_mhz"] | c.read_mhz;
+    c.touch_on  = doc["touch_on"] | c.touch_on;
+    c.touch_cs  = doc["touch_cs"] | c.touch_cs;     c.touch_irq = doc["touch_irq"] | c.touch_irq;
+    c.bgr       = doc["bgr"] | c.bgr;               c.invert = doc["invert"] | c.invert;
+    if (const char *why = hw_validate(c)) return fail(why);
+    if (!hw_save(c)) return fail("Speichern fehlgeschlagen");
+    send_json(200, "{\"ok\":true}");
+    Serial.println("[HW] new hardware configuration saved, restarting");
+    delay(400);
+    ESP.restart();
+}
+
+static void handle_hw_reset() {
+    hw_reset_stored();
+    send_json(200, "{\"ok\":true}");
+    Serial.println("[HW] hardware configuration reset from the portal, restarting");
+    delay(400);
+    ESP.restart();
+}
+
+static void handle_hw_test() {
+    display_test();
+    lv_obj_invalidate(lv_scr_act());   // LVGL redraws the portal screen
+    send_json(200, "{\"ok\":true}");
+}
+
 // ── Captive portal redirect ───────────────────────────────────────────────────
 
 static void handle_captive() {
@@ -331,6 +494,10 @@ void provisioning_begin(const char *ap_ssid, const Config *current) {
         server.on("/state",   HTTP_GET,  handle_state);
         server.on("/scan",    HTTP_GET,  handle_scan);
         server.on("/save",    HTTP_POST, handle_save);
+        server.on("/hw",       HTTP_GET,  handle_hw_get);
+        server.on("/hw",       HTTP_POST, handle_hw_save);
+        server.on("/hw/reset", HTTP_POST, handle_hw_reset);
+        server.on("/hw/test",  HTTP_POST, handle_hw_test);
         // Captive portal endpoints (Android, Windows, iOS)
         server.on("/generate_204",              handle_captive);
         server.on("/connecttest.txt",           handle_captive);

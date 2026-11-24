@@ -1,5 +1,7 @@
 # Display-Diagnose (nur für Entwickler/Fehlersuche)
 
+> **Ab 0.7.0 ersetzt der „Display-Test“ im Portal (Bereich Hardware, siehe [hardware.md](hardware.md)) diese Builds.** Die `diag-*`-Umgebungen gibt es nicht mehr; die Dateien in `firmware/diag/` sind die letzten TFT_eSPI-Diagnose-Images (0.6.x) und nur noch historisch.
+
 Die `diag-*`-Umgebungen in `firmware/platformio.ini` sind **kein Release**. Sie lesen beim Start die Controller-ID
 und malen vier Vollbild-Farben (rot, grün, blau, weiß, je 1 s). Das Bild ist sofort sichtbar, wenn die Variante passt.
 
