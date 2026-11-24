@@ -5,10 +5,12 @@ import voluptuous as vol
 
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 
 from .const import CONF_CLICK, CONF_DEVICE_KEY, CONF_HA_URL, DOMAIN
 from homeassistant.helpers import entity_registry as er
 
+from . import custom_firmware
 from .devices import brightness_of, click_of, device_subentries, get_entry, rotation_of, screen_size
 from .firmware import bundle_of
 from .layouts import LayoutStore, validate_layout
@@ -47,7 +49,7 @@ def _resolve(hass: HomeAssistant, connection, msg):
 
 @callback
 def async_register(hass: HomeAssistant) -> None:
-    for command in (ws_devices, ws_layout_get, ws_layout_set, ws_setup_info, ws_settings_set):
+    for command in (ws_devices, ws_layout_get, ws_layout_set, ws_setup_info, ws_settings_set, ws_custom_fw_get, ws_custom_fw_install, ws_custom_fw_discard):
         websocket_api.async_register_command(hass, command)
 
 
@@ -131,3 +133,41 @@ def ws_settings_set(hass: HomeAssistant, connection: websocket_api.ActiveConnect
     entry = get_entry(hass)
     hass.config_entries.async_update_subentry(entry, sub, data={**sub.data, CONF_CLICK: msg["click"]})
     connection.send_result(msg["id"], _payload(hass, msg["device_id"]))
+
+
+@websocket_api.websocket_command({vol.Required("type"): "display/custom_firmware/get", vol.Required("device_id"): str})
+@websocket_api.require_admin
+@callback
+def ws_custom_fw_get(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """The image picked for this display (expert mode), or None."""
+    if _resolve(hass, connection, msg) is None:
+        return
+    pending = custom_firmware.pending_for(hass, msg["device_id"])
+    connection.send_result(msg["id"], pending.public() if pending else None)
+
+
+@websocket_api.websocket_command({vol.Required("type"): "display/custom_firmware/install", vol.Required("device_id"): str})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_custom_fw_install(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """Install the picked image; answers when the display is back (or the update failed)."""
+    if _resolve(hass, connection, msg) is None:
+        return
+    try:
+        result = await custom_firmware.async_install(hass, msg["device_id"])
+    except HomeAssistantError as err:
+        connection.send_error(msg["id"], websocket_api.ERR_UNKNOWN_ERROR, str(err))
+        return
+    connection.send_result(msg["id"], result)
+
+
+@websocket_api.websocket_command({vol.Required("type"): "display/custom_firmware/discard", vol.Required("device_id"): str})
+@websocket_api.require_admin
+@callback
+def ws_custom_fw_discard(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    if _resolve(hass, connection, msg) is None:
+        return
+    pending = custom_firmware.pending_for(hass, msg["device_id"])
+    if pending is not None and not pending.armed:
+        hass.data[DOMAIN]["custom_fw"].pop(msg["device_id"], None)
+    connection.send_result(msg["id"], None)

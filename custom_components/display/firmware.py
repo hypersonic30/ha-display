@@ -13,6 +13,7 @@ from homeassistant.components.http.ban import process_wrong_login
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
+from .custom_firmware import armed_data
 from .devices import find_by_key, get_entry
 
 _LOGGER = logging.getLogger(__name__)
@@ -60,9 +61,12 @@ class DisplayFirmwareView(HomeAssistantView):
     async def get(self, request: web.Request, variant: str) -> web.StreamResponse:
         key = request.headers.get("X-Device-Key", "")
         entry = get_entry(self.hass)
-        if not key or entry is None or find_by_key(entry, key) is None:
+        sub = find_by_key(entry, key) if key and entry is not None else None
+        if sub is None:
             await process_wrong_login(request)
             return web.Response(status=401, text="unknown device key")
+        if (custom := armed_data(self.hass, sub.subentry_id)) is not None:   # expert mode: the image picked in the card
+            return web.Response(body=custom, headers={"Content-Type": "application/octet-stream", "Cache-Control": "no-store"})
         bundle = bundle_of(self.hass)
         info = bundle["variants"].get(variant) if bundle else None
         if info is None:

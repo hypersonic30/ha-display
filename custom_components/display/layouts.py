@@ -53,8 +53,8 @@ def info_signal(subentry_id: str) -> str:
 class OtaRun:
     """One running firmware update of one panel."""
 
-    def __init__(self, target: str, future: asyncio.Future) -> None:
-        self.target = target
+    def __init__(self, target: str | None, future: asyncio.Future) -> None:
+        self.target = target          # None: an image the user picked, its version is not known to Home Assistant
         self.future = future
         self.state = "starting"
         self.progress = 0
@@ -353,7 +353,10 @@ class LayoutStore:
         self._info[device_id] = {"fw": fw or None, "variant": variant or None}
         run = self._ota.get(device_id)
         if run and not run.future.done():
-            if fw == run.target:
+            if run.target is None:
+                if run.done_seen:
+                    run.future.set_result(None)       # whatever the display reports after "done" is the new image
+            elif fw == run.target:
                 run.future.set_result(None)
             elif run.done_seen:
                 run.future.set_exception(
@@ -365,7 +368,7 @@ class LayoutStore:
         return self._ota.get(device_id)
 
     @callback
-    def ota_begin(self, device_id: str, target: str) -> asyncio.Future:
+    def ota_begin(self, device_id: str, target: str | None) -> asyncio.Future:
         if (run := self._ota.get(device_id)) and not run.future.done():
             raise HomeAssistantError("A firmware update of this display is already running")
         run = OtaRun(target, self._hass.loop.create_future())

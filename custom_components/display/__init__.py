@@ -15,6 +15,7 @@ from homeassistant.helpers.typing import ConfigType
 from . import services, websocket_api
 from .const import CARD_FILE, CONF_DEVICE_KEY, CONF_SIDEBAR, DOMAIN, PANEL_FILE, PANEL_URL, STATIC_PATH
 from .devices import device_subentries, rotation_of, screen_size
+from .custom_firmware import CustomFirmwareView
 from .firmware import DisplayFirmwareView, async_load_bundle
 from .layouts import LayoutStore
 from .panel import CLOSE_GONE, DisplayPingView, DisplaySocketView
@@ -39,6 +40,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     hass.http.register_view(DisplaySocketView(hass))
     hass.http.register_view(DisplayPingView())
     hass.http.register_view(DisplayFirmwareView(hass))
+    hass.http.register_view(CustomFirmwareView(hass))
 
     async def close_panels(_: Event) -> None:
         for session in list(hass.data[DOMAIN]["sessions"]):

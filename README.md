@@ -98,6 +98,16 @@ Das **erste** Flashen geschieht per Kabel (siehe oben). Danach brauchst du es ni
 - Die Integration bringt die Images mit; welche Version zu welchem Display passt (ILI9488 oder ILI9481), erkennt sie selbst.
 - Ein Display mit einer Firmware **vor 0.3.0** kann nicht per OTA aktualisiert werden und muss einmal per Kabel geflasht werden.
 
+### Eigene Firmware per Funk testen (Profi-Modus, ab 0.9.0)
+
+Wer selbst Firmware baut (`pio run`), muss nicht jedes Mal das Kabel anschließen und die Integration aktualisieren: In der Karte den Haken **Profi-Modus** setzen, dann erscheint eine Dateiauswahl.
+
+1. **`firmware.bin`** (aus `firmware/.pio/build/ili9481|ili9488/`) im Datei-Dialog des Browsers wählen. Das geht von jedem Rechner aus, auf dem du Home Assistant öffnest. Gebraucht wird die Datei `firmware.bin`, nicht `bootloader.bin` oder `partitions.bin`.
+2. Die Datei wird hochgeladen und geprüft (ESP32-Image, passt in die Partition, höchstens 1,9 MB). Die Karte zeigt Größe, MD5 und die Version im Image.
+3. **Auf das Display installieren** startet dasselbe Verfahren wie beim normalen Update (Fortschritt, Prüfsumme, Neustart, Rückfall bei Absturz-Schleife).
+
+Hinweise: Nur Administratoren dürfen die Datei hochladen. Sie liegt nur im Arbeitsspeicher von Home Assistant und wird nach der Installation verworfen; ein Display bekommt sie nur während seiner eigenen Installation. Ob die Variante passt (ILI9481/ILI9488), wird nicht erkannt. Meldet sich das Display danach mit der alten Firmware zurück, ist es auf die vorherige zurückgefallen. Das merkt die Integration bei eigenen Dateien nicht: Sie meldet dann Erfolg und zeigt die gemeldete Version. Das Display muss eingeschaltet und verbunden sein.
+
 ### 3. Display einrichten
 
 Ohne gespeicherte Zugangsdaten öffnet das Display einen WLAN-Hotspot. **SSID und Passwort stehen auf dem Display** (WPA2, das Passwort ändert sich bei jedem Start).

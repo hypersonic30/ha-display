@@ -1,7 +1,7 @@
 // ESP32 Display card: visual layout editor for the panels set up in the "ESP32 Display" integration.
 // Talks to Home Assistant only through the integration's WebSocket commands (display/...).
 
-const CARD_VERSION = "0.8.0";
+const CARD_VERSION = "0.9.0";
 const GRID = 5, MAX_WIDGETS = 32, MAX_PAGES = 8, MIN_SIZE = 20, PAGER_MIN_W = 60, PAGER_MIN_H = 24;
 const PAGER_ID = "__pager";
 
@@ -218,11 +218,13 @@ class DisplayCard extends HTMLElement {
           <span class="dim" id="res"></span>
           <label class="clk" title="Kurzer Klick vom Summer bei jeder Berührung eines Bedienelements (braucht den Summer auf der Platine)"><input type="checkbox" id="click"> Tastenton</label>
           <span class="dim" id="fw"></span><button class="btn" id="fwbtn" hidden>Aktualisieren</button>
+          <label class="clk" title="Eine eigene Firmware-Datei (.bin) per Funk auf dieses Display laden – für Tests und Entwickler"><input type="checkbox" id="expert"> Profi-Modus</label>
           <button class="btn" id="setup">Einrichtung</button>
           <button class="btn" id="reload" title="Gespeicherten Stand neu laden">↻</button>
           <button class="btn primary" id="save" disabled>Speichern</button>
         </div>
         <div id="setupbox"></div>
+        <div id="expertbox" hidden></div>
         <div id="msg"></div>
         <div class="pagebar" id="pages"></div>
         <div class="body">
@@ -239,6 +241,9 @@ class DisplayCard extends HTMLElement {
     $("setup").addEventListener("click", () => this._toggleSetup());
     $("click").addEventListener("change", (e) => this._setClick(e.target.checked));
     $("fwbtn").addEventListener("click", () => this._updateFirmware());
+    $("expert").checked = localStorage.getItem("dc-expert") === "1";
+    $("expert").addEventListener("change", (e) => { localStorage.setItem("dc-expert", e.target.checked ? "1" : "0"); this._renderExpert(); });
+    this._renderExpert();
     this.shadowRoot.querySelectorAll(".pi").forEach((el) => {
       el.addEventListener("dragstart", (e) => e.dataTransfer.setData("text/plain", el.dataset.type));
       el.addEventListener("click", () => this._add(el.dataset.type, 20, 20, true));
@@ -329,6 +334,7 @@ class DisplayCard extends HTMLElement {
     this._deviceId = id;
     this._page = 0;
     this.shadowRoot.getElementById("setupbox").innerHTML = "";
+    this._renderExpert();
     await this._load();
   }
 
@@ -392,6 +398,7 @@ class DisplayCard extends HTMLElement {
     button.hidden = !available && !a.in_progress;
     button.disabled = !!a.in_progress || !this._online;
     button.title = this._online ? "" : "Das Display muss eingeschaltet und verbunden sein";
+    this._refreshExpert(a);
   }
 
   async _updateFirmware() {
@@ -405,6 +412,91 @@ class DisplayCard extends HTMLElement {
       setTimeout(() => this._message(""), 4000);
     } catch (err) {
       this._message(`Update fehlgeschlagen: ${err.message || err.code}`, true);
+    }
+  }
+
+  // ── Expert mode: install a firmware file picked here (over the air, through the integration) ─────────
+
+  async _renderExpert() {
+    const box = this.shadowRoot.getElementById("expertbox");
+    if (!box) return;
+    const on = this.shadowRoot.getElementById("expert").checked;
+    box.hidden = !on;
+    if (!on) { box.innerHTML = ""; return; }
+    box.innerHTML = `<div class="setup">
+      <p class="hint"><b>Profi-Modus:</b> Hier wählst du eine eigene Firmware-Datei (<code>firmware.bin</code> aus <code>.pio/build/…</code>) von diesem Rechner aus und lädst sie per Funk auf das Display. Die Datei wird geprüft und nur im Arbeitsspeicher von Home Assistant gehalten. Startet die neue Firmware nicht, geht das Display selbst auf die alte zurück. Eine falsche Variante (ili9481/ili9488) wird nicht erkannt.</p>
+      <div class="row"><input type="file" id="xfile" accept=".bin,application/octet-stream"><button class="btn" id="xdrop" hidden>Verwerfen</button></div>
+      <div id="xinfo" class="hint"></div>
+      <div class="row"><button class="btn primary" id="xgo" hidden>Auf das Display installieren</button><span class="dim" id="xprog"></span></div>
+    </div>`;
+    const $ = (id) => box.querySelector(`#${id}`);
+    $("xfile").addEventListener("change", (e) => e.target.files[0] && this._pickFirmware(e.target.files[0]));
+    $("xdrop").addEventListener("click", () => this._dropFirmware());
+    $("xgo").addEventListener("click", () => this._installCustom());
+    const id = this._deviceId;
+    try {
+      const res = await this._hass.callWS({ type: "display/custom_firmware/get", device_id: id });
+      if (id === this._deviceId) this._showCustom(res);
+    } catch (err) { /* nothing picked or not allowed: the picker stays */ }
+  }
+
+  _showCustom(info) {
+    this._custom = info;
+    const box = this.shadowRoot.getElementById("expertbox");
+    if (!box || box.hidden) return;
+    const kb = info ? (info.size / 1024).toFixed(0) : "";
+    box.querySelector("#xinfo").innerHTML = info
+      ? `<b>${esc(info.name)}</b> · ${kb} KB · MD5 <code>${esc(info.md5)}</code>${info.version ? ` · Version im Image: <code>${esc(info.version)}</code>` : ""}${info.project ? ` · Projekt: <code>${esc(info.project)}</code>` : ""}`
+      : "";
+    box.querySelector("#xdrop").hidden = !info;
+    box.querySelector("#xgo").hidden = !info;
+    this._refreshExpert();
+  }
+
+  _refreshExpert(attrs) {
+    const box = this.shadowRoot.getElementById("expertbox");
+    if (!box || box.hidden) return;
+    if (!attrs) { const dev = this._devices.find((d) => d.id === this._deviceId); attrs = this._hass.states[dev?.update_entity]?.attributes; }
+    const busy = !!attrs?.in_progress;
+    const go = box.querySelector("#xgo");
+    if (go) { go.disabled = busy || !this._online; go.title = this._online ? "" : "Das Display muss eingeschaltet und verbunden sein"; }
+    box.querySelector("#xprog").textContent = busy ? `Update läuft … ${attrs.update_percentage ?? 0} %` : "";
+  }
+
+  async _pickFirmware(file) {
+    const box = this.shadowRoot.getElementById("expertbox");
+    this._message(`Lade „${file.name}“ hoch …`);
+    try {
+      const res = await this._hass.fetchWithAuth(`/api/display/custom-firmware/${encodeURIComponent(this._deviceId)}?name=${encodeURIComponent(file.name)}`, { method: "POST", body: file });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.message || body.error || `Fehler ${res.status}`);
+      this._showCustom(body);
+      this._message("Datei geprüft. Mit „Auf das Display installieren“ geht es los.");
+      setTimeout(() => this._message(""), 4000);
+    } catch (err) {
+      this._message(`Datei abgelehnt: ${err.message}`, true);
+    }
+    box.querySelector("#xfile").value = "";
+  }
+
+  async _dropFirmware() {
+    try { await this._hass.callWS({ type: "display/custom_firmware/discard", device_id: this._deviceId }); } catch (err) { /* already gone */ }
+    this._showCustom(null);
+  }
+
+  async _installCustom() {
+    const dev = this._devices.find((d) => d.id === this._deviceId);
+    const info = this._custom;
+    if (!info || !confirm(`„${info.name}“ auf „${dev.name}“ installieren?\n\nDas Display lädt die Datei und startet danach neu. In dieser Zeit nicht ausschalten.`)) return;
+    this._message("Installation gestartet …");
+    try {
+      const res = await this._hass.callWS({ type: "display/custom_firmware/install", device_id: this._deviceId });
+      this._showCustom(null);
+      this._message(`Installiert. Das Display meldet Firmware ${res.fw || "?"}.`);
+      setTimeout(() => this._message(""), 6000);
+    } catch (err) {
+      this._message(`Installation fehlgeschlagen: ${err.message || err.code}`, true);
+      this._renderExpert();
     }
   }
 

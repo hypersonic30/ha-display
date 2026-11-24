@@ -10,6 +10,8 @@ PORT = 8330
 PAGE = """<!doctype html><meta charset=utf-8><body><script type="module" src="/display-card.js"></script>
 <script>
 window.__calls = [];
+window.__fetches = [];
+window.__fetchResult = { ok: true, status: 200, body: {} };
 window.__stub = {};
 window.mount = (config, states) => {
   const hass = { states, callService: async (d, sv, data) => { window.__calls.push({ type: "service", domain: d, service: sv, data }); if (window.__serviceError) throw new Error(window.__serviceError); }, callWS: async (msg) => {
@@ -18,6 +20,7 @@ window.mount = (config, states) => {
       if (!h) throw { code: "not_found", message: "no stub for " + msg.type };
       return typeof h === "function" ? h(msg) : h;
   } };
+  hass.fetchWithAuth = async (url, opts) => { window.__fetches.push({ url, method: opts.method, size: opts.body.size, name: opts.body.name }); const r = window.__fetchResult; return { ok: r.ok, status: r.status, json: async () => r.body }; };
   window.hass = hass;
   const card = document.createElement("display-card");
   card.setConfig(config);
@@ -82,6 +85,9 @@ def mount(pg, stub, config=None, states=STATES):
         "display/layout/get": (m) => ({ name: "x", rev: 1, ...store[m.device_id], screen: stub.screens[m.device_id] || { w: 480, h: 320 }, settings: { brightness: 80, rotation: 0, click: !!(stub.click || {})[m.device_id] } }),
         "display/settings/set": (m) => { if (stub.settingsError) throw { code: "unauthorized", message: "Unauthorized" }; (stub.click = stub.click || {})[m.device_id] = m.click; return { settings: { click: m.click } }; },
         "display/layout/set": (m) => { if (stub.saveError) throw { code: "invalid_format", message: stub.saveError }; store[m.device_id] = { pages: m.pages, pager: m.pager }; return { rev: 2, name: "x", pages: m.pages, pager: m.pager, screen: stub.screens[m.device_id] || { w: 480, h: 320 }, settings: { brightness: 80, rotation: 0 } }; },
+        "display/custom_firmware/get": () => window.__custom || null,
+        "display/custom_firmware/discard": () => { window.__custom = null; return null; },
+        "display/custom_firmware/install": () => { if (window.__installError) throw { code: "unknown_error", message: window.__installError }; window.__custom = null; return { fw: "0.9.9-test" }; },
         "display/setup_info": (m) => { if (stub.notAdmin) throw { code: "unauthorized", message: "Unauthorized" }; return { name: "Küche", ha_url: "http://ha:8123", device_key: "SECRET-KEY_1" }; },
       };
       window.mount(config, states);
