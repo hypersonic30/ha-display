@@ -29,6 +29,8 @@ static bool     press_moved = false;        // the finger travelled: a drag, not
 // Screen rotation 0..3 (0 = landscape 480x320, 1 = portrait 320x480, ...). The layout decides it.
 static int  cur_rotation     = 0;
 static bool calibrate_pending = false;   // set inside a callback, done from loop()
+static bool touch_uncalibrated = false;  // running on default data, nothing stored for this rotation yet
+static bool calibration_offered = false; // the one automatic offer per boot has been made
 
 static int tft_rotation(int r) { return (1 + r) % 4; }   // 0 = the original TFT_eSPI rotation 1
 
@@ -102,29 +104,111 @@ static bool boot_hold_requested() {
     return false;
 }
 
-// Blocking: corner markers, then store the result for the current rotation. The XPT2046 mapping differs
-// per rotation, so each of the four has its own data.
+// Rough XPT2046 data per rotation (TFT_eSPI example values for 480x320, flipped for the 180 degree
+// rotations). Good enough to hit big targets; a real calibration replaces them.
+static void default_touch_cal(int r, uint16_t cal[5]) {
+    static const uint16_t base[2][5] = {
+        {275, 3620, 264, 3532, 1},   // landscape: axes swapped
+        {300, 3600, 300, 3600, 0},   // portrait
+    };
+    const uint16_t *b = base[r & 1];
+    for (int i = 0; i < 4; i++) cal[i] = b[i];
+    cal[4] = b[4] | ((r & 2) ? 6 : 0);   // rotations 2 and 3: both axes inverted
+}
+
+// Touch pressure above this counts as a press (TFT_eSPI uses Z_THRESHOLD/2 for the corners as well).
+static const uint16_t CAL_Z = 175;
+
+// Corner markers like TFT_eSPI::calibrateTouch (same maths) but with a deadline: returns false if nobody
+// touches within `timeout_ms` of the start (display blank / no touch), so a dead panel never blocks boot.
+static bool calibrate_corners(uint16_t cal[5], uint32_t timeout_ms) {
+    const uint8_t size = 15;
+    const int16_t w = tft.width(), h = tft.height();
+    const uint32_t deadline = millis() + timeout_ms;
+    int32_t v[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+
+    for (uint8_t i = 0; i < 4; i++) {
+        tft.fillRect(0, 0, size + 1, size + 1, TFT_BLACK);
+        tft.fillRect(0, h - size - 1, size + 1, size + 1, TFT_BLACK);
+        tft.fillRect(w - size - 1, 0, size + 1, size + 1, TFT_BLACK);
+        tft.fillRect(w - size - 1, h - size - 1, size + 1, size + 1, TFT_BLACK);
+        int16_t cx = (i == 2 || i == 3) ? w - 1 : 0, cy = (i == 1 || i == 3) ? h - 1 : 0;
+        int16_t dx = cx ? -size : size, dy = cy ? -size : size;
+        tft.drawLine(cx, cy, cx + dx, cy, TFT_MAGENTA);
+        tft.drawLine(cx, cy, cx, cy + dy, TFT_MAGENTA);
+        tft.drawLine(cx, cy, cx + dx, cy + dy, TFT_MAGENTA);
+
+        if (i > 0) delay(1000);   // give the finger time to leave the previous corner
+        for (uint8_t j = 0; j < 8; j++) {
+            for (;;) {
+                if (millis() > deadline) return false;
+                if (tft.getTouchRawZ() > CAL_Z) break;
+                delay(5);
+            }
+            delay(10);
+            uint16_t x, y;
+            tft.getTouchRaw(&x, &y);
+            v[i * 2] += x; v[i * 2 + 1] += y;
+            delay(10);
+        }
+        v[i * 2] /= 8; v[i * 2 + 1] /= 8;
+    }
+
+    bool rotate = abs(v[0] - v[2]) > abs(v[1] - v[3]);
+    int32_t x0, x1, y0, y1;
+    if (rotate) { x0 = (v[1] + v[3]) / 2; x1 = (v[5] + v[7]) / 2; y0 = (v[0] + v[4]) / 2; y1 = (v[2] + v[6]) / 2; }
+    else        { x0 = (v[0] + v[2]) / 2; x1 = (v[4] + v[6]) / 2; y0 = (v[1] + v[5]) / 2; y1 = (v[3] + v[7]) / 2; }
+    bool inv_x = false, inv_y = false;
+    if (x0 > x1) { int32_t t = x0; x0 = x1; x1 = t; inv_x = true; }
+    if (y0 > y1) { int32_t t = y0; y0 = y1; y1 = t; inv_y = true; }
+    x1 -= x0; y1 -= y0;
+    if (x0 == 0) x0 = 1;
+    if (x1 == 0) x1 = 1;
+    if (y0 == 0) y0 = 1;
+    if (y1 == 0) y1 = 1;
+    cal[0] = x0; cal[1] = x1; cal[2] = y0; cal[3] = y1;
+    cal[4] = (rotate ? 1 : 0) | (inv_x ? 2 : 0) | (inv_y ? 4 : 0);
+    return true;
+}
+
+// Blocking for at most about a minute: corner markers, then store the result for the current rotation. The
+// XPT2046 mapping differs per rotation, so each of the four has its own data. Without any touch it gives
+// up, keeps the default data and does not store anything (the next boot offers it again).
 static void run_calibration() {
     uint16_t cal[5];
+    Serial.println("[TOUCH] calibration started");
     tft.fillScreen(TFT_BLACK);
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
     tft.drawCentreString("Touch kalibrieren", tft.width() / 2, tft.height() / 2 - 24, 4);
     tft.drawCentreString("Markierungen an den Ecken antippen", tft.width() / 2, tft.height() / 2 + 16, 2);
     delay(1500);
-    tft.calibrateTouch(cal, TFT_MAGENTA, TFT_BLACK, 15);
-    storage_save_touch(cur_rotation, cal);
-    tft.setTouch(cal);
+    if (calibrate_corners(cal, 60000)) {
+        storage_save_touch(cur_rotation, cal);
+        tft.setTouch(cal);
+        touch_uncalibrated = false;
+        Serial.println("[TOUCH] calibration stored");
+    } else {
+        default_touch_cal(cur_rotation, cal);
+        tft.setTouch(cal);
+        Serial.println("[TOUCH] no touch within 60 s, keeping default data");
+    }
     tft.fillScreen(TFT_BLACK);
     press_since = 0;
 }
 
+// Never blocks without a user action: no stored data means default data and the normal start; the
+// calibration is offered later (see loop()). Holding the screen at power-up still forces it.
 static void touch_init() {
     uint16_t cal[5];
     bool have = storage_load_touch(cur_rotation, cal);
-    if (have) tft.setTouch(cal);
+    if (!have) {
+        default_touch_cal(cur_rotation, cal);
+        touch_uncalibrated = true;
+        Serial.println("[TOUCH] no stored calibration, using defaults");
+    }
+    tft.setTouch(cal);
 
-    bool recalibrate = boot_hold_requested();
-    if (!have || recalibrate) run_calibration();
+    if (boot_hold_requested()) run_calibration();
     tft.fillScreen(TFT_BLACK);
 }
 
@@ -156,8 +240,13 @@ static void apply_rotation(int r) {
     lv_disp_drv_update(disp, &disp_drv);
 
     uint16_t cal[5];
-    if (storage_load_touch(r, cal)) tft.setTouch(cal);
-    else                            calibrate_pending = true;   // from loop(): not inside a WebSocket callback
+    if (storage_load_touch(r, cal)) { tft.setTouch(cal); touch_uncalibrated = false; }
+    else {
+        default_touch_cal(r, cal);
+        tft.setTouch(cal);                  // usable until the calibration below has run
+        touch_uncalibrated = true;
+        calibrate_pending = true;           // from loop(): not inside a WebSocket callback
+    }
     tft.fillScreen(TFT_BLACK);
     press_since = 0;
     Serial.printf("[UI] rotation %d (%dx%d)\n", r, (int)tft.width(), (int)tft.height());
@@ -395,12 +484,23 @@ static void run_ota() {
 
 void setup() {
     Serial.begin(115200);
+    delay(50);
+    Serial.printf("\n[BOOT] ha-display fw %s (%s), reset reason %d, free heap %u\n", FW_VERSION, FW_VARIANT,
+                  (int)esp_reset_reason(), (unsigned)ESP.getFreeHeap());
+    Serial.printf("[BOOT] TFT pins MOSI=%d SCLK=%d MISO=%d CS=%d DC=%d RST=%d BL=%d, touch CS=%d\n",
+                  TFT_MOSI, TFT_SCLK, TFT_MISO, TFT_CS, TFT_DC, TFT_RST, TFT_BL, TOUCH_CS);
+    Serial.println("[BOOT] stage: ota check");
     ota_boot_check();   // a new image that keeps failing is rolled back before it can do more harm
+    Serial.println("[BOOT] stage: display");
     tft_init();
+    Serial.println("[BOOT] stage: touch");
     touch_init();
+    Serial.println("[BOOT] stage: lvgl");
     lvgl_init();
+    Serial.println("[BOOT] stage: ui");
     ui_init();
     build_ap_ssid();
+    Serial.println("[BOOT] stage: storage");
 
     if (storage_load(cfg)) {
         Serial.printf("[BOOT] Credentials found, %d saved network(s)\n", cfg.wifi_count);
@@ -414,6 +514,13 @@ void setup() {
 // ── Loop ──────────────────────────────────────────────────────────────────────
 
 void loop() {
+    // First boot without stored touch data: offer the calibration once, but only when the panel is up and
+    // talking to Home Assistant (never while the hotspot, OTA or a connection attempt needs the device).
+    if (touch_uncalibrated && !calibration_offered && state == RUNNING && !portal_overlay && !ota_running() &&
+        millis() > 5000) {
+        calibration_offered = true;
+        calibrate_pending = true;
+    }
     if (calibrate_pending) {
         calibrate_pending = false;
         run_calibration();
