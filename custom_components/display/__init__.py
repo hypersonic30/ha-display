@@ -12,7 +12,7 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.loader import async_get_integration
 from homeassistant.helpers.typing import ConfigType
 
-from . import websocket_api
+from . import services, websocket_api
 from .const import CARD_FILE, CONF_DEVICE_KEY, CONF_SIDEBAR, DOMAIN, PANEL_FILE, PANEL_URL, STATIC_PATH
 from .devices import device_subentries, rotation_of, screen_size
 from .firmware import DisplayFirmwareView, async_load_bundle
@@ -35,6 +35,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     await store.async_load()
     hass.data[DOMAIN] = {"store": store, "sessions": set(), "firmware": await async_load_bundle(hass)}
     websocket_api.async_register(hass)
+    services.async_setup_services(hass)
     hass.http.register_view(DisplaySocketView(hass))
     hass.http.register_view(DisplayPingView())
     hass.http.register_view(DisplayFirmwareView(hass))

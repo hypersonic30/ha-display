@@ -10,3 +10,8 @@ void provisioning_handle();
 bool provisioning_done();
 Config provisioning_config();
 void provisioning_end();
+
+// "Touch neu kalibrieren" from the setup page: the POST only sets a request, main.cpp runs the (blocking)
+// calibration on the display between two portal passes and reports the outcome back for the page to poll.
+bool provisioning_calibrate_requested();       // true once per request
+void provisioning_calibrate_state(int state);  // 0 idle, 1 running, 2 stored, 3 nobody touched the screen

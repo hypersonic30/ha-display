@@ -20,6 +20,7 @@ struct HwConfig {
     int8_t  touch_irq;          // -1 = poll the pressure over SPI (works without the IRQ wire)
     uint8_t bgr;                // 1 = colour order BGR (usual for these modules), 0 = RGB
     uint8_t invert;             // 1 = display inversion on
+    int8_t  buzzer;             // buzzer transistor (tone via LEDC), -1 = none. Added in layout version 2: keep it last
 };
 
 const char *hw_panel_name(uint8_t panel);

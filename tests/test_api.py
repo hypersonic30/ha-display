@@ -55,7 +55,7 @@ async def test_devices_list_and_empty_layout(hass, make_entry, admin):
         "pages": [{"id": "p1", "name": "Seite 1", "widgets": []}],
         "pager": None,
         "screen": {"w": 480, "h": 320},
-        "settings": {"brightness": 80, "rotation": 0},
+        "settings": {"brightness": 80, "rotation": 0, "click": False},
     }
     assert (await call(admin, "display/layout/get", device_id="nope"))["error"]["code"] == "not_found"
 

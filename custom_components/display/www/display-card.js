@@ -137,6 +137,7 @@ const STYLE = `
 .chip.on { background: var(--primary-color); color: var(--text-primary-color, #fff); border-color: transparent; }
 .chip.add { padding: 5px 11px; font-size: 15px; } .chip:disabled { opacity: .4; cursor: default; }
 .dim { color: var(--secondary-text-color); font-size: 12px; }
+.clk { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; color: var(--secondary-text-color); cursor: pointer; white-space: nowrap; }
 .rz { position: absolute; right: 0; bottom: 0; width: 18px; height: 18px; cursor: nwse-resize; touch-action: none; }
 .rz::after { content: ""; position: absolute; right: 3px; bottom: 3px; width: 8px; height: 8px; border-right: 2px solid #4fc3f7; border-bottom: 2px solid #4fc3f7; }
 .props { flex: 0 0 230px; padding: 14px; border-left: 1px solid var(--divider-color); }
@@ -215,6 +216,7 @@ class DisplayCard extends HTMLElement {
           <span class="dot" id="dot" title="Display verbunden?"></span>
           <select id="dev" ${fixed ? "disabled" : ""}>${this._devices.map((d) => `<option value="${esc(d.id)}">${esc(d.name)}</option>`).join("")}</select>
           <span class="dim" id="res"></span>
+          <label class="clk" title="Kurzer Klick vom Summer bei jeder Berührung eines Bedienelements (braucht den Summer auf der Platine)"><input type="checkbox" id="click"> Tastenton</label>
           <span class="dim" id="fw"></span><button class="btn" id="fwbtn" hidden>Aktualisieren</button>
           <button class="btn" id="setup">Einrichtung</button>
           <button class="btn" id="reload" title="Gespeicherten Stand neu laden">↻</button>
@@ -235,6 +237,7 @@ class DisplayCard extends HTMLElement {
     $("save").addEventListener("click", () => this._save());
     $("reload").addEventListener("click", () => this._reload());
     $("setup").addEventListener("click", () => this._toggleSetup());
+    $("click").addEventListener("change", (e) => this._setClick(e.target.checked));
     $("fwbtn").addEventListener("click", () => this._updateFirmware());
     this.shadowRoot.querySelectorAll(".pi").forEach((el) => {
       el.addEventListener("dragstart", (e) => e.dataTransfer.setData("text/plain", el.dataset.type));
@@ -293,9 +296,24 @@ class DisplayCard extends HTMLElement {
     this._pager = layout.pager ? { ...layout.pager, id: PAGER_ID, type: "pager" } : null;
     this._page = Math.min(this._page, this._pages.length - 1);
     this._screen = layout.screen;
+    const click = this.shadowRoot.getElementById("click");
+    if (click) click.checked = !!(layout.settings && layout.settings.click);
     const res = this.shadowRoot.getElementById("res");
     if (res) res.textContent = `${this._W}×${this._H} ${this._W > this._H ? "Querformat" : "Hochformat"}`;
     if (this._stage) this._fit(this._stage);
+  }
+
+  // The click setting belongs to the display, not to the layout: it is stored at once and needs no "Speichern".
+  async _setClick(on) {
+    const box = this.shadowRoot.getElementById("click");
+    try {
+      await this._hass.callWS({ type: "display/settings/set", device_id: this._deviceId, click: on });
+      this._message(on ? "Tastenton ist an." : "Tastenton ist aus.");
+      setTimeout(() => this._message(""), 3000);
+    } catch (err) {
+      box.checked = !on;
+      this._message(`Tastenton nicht gespeichert: ${err.message || err.code}`, true);
+    }
   }
 
   async _reload() {

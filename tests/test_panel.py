@@ -104,7 +104,7 @@ async def test_each_panel_gets_its_own_layout_and_states(hass, make_entry, hass_
     ws = await connect(hass_client_no_auth)
     layout = await recv(ws)
     assert layout["type"] == "layout" and layout["name"] == "Küche" and layout["rev"] == 1
-    assert layout["settings"] == {"brightness": 60, "rotation": 0} and [w["id"] for w in layout["widgets"]] == ["b1", "l1"]
+    assert layout["settings"] == {"brightness": 60, "rotation": 0, "click": False} and [w["id"] for w in layout["widgets"]] == ["b1", "l1"]
     assert layout["screen"] == {"w": 480, "h": 320} and layout["page"] == {"index": 0, "count": 1, "name": "Seite 1"} and layout["pager"] is None
     assert await recv(ws) == {"type": "states", "states": {"light.kitchen": "on", "sensor.temp": "21.5"}}
 
@@ -147,7 +147,7 @@ async def test_layout_and_settings_changes_reach_a_connected_panel(hass, make_en
 
     hass.config_entries.async_update_subentry(entry, entry.subentries[dev_id(entry, "Küche")], data={CONF_BRIGHTNESS: 30, CONF_ROTATION: 0, CONF_DEVICE_KEY: "key-küche"})
     await hass.async_block_till_done()
-    assert (await recv(ws))["settings"] == {"brightness": 30, "rotation": 0}
+    assert (await recv(ws))["settings"] == {"brightness": 30, "rotation": 0, "click": False}
 
 
 async def test_taps_are_mapped_by_the_server_from_the_layout(hass, make_entry, hass_client_no_auth):

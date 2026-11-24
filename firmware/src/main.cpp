@@ -11,6 +11,7 @@
 #include "tls.h"
 #include "display.h"
 #include "hw.h"
+#include "buzzer.h"
 
 // ── Display, touch & LVGL ─────────────────────────────────────────────────────
 
@@ -33,6 +34,8 @@ static int  cur_rotation     = 0;
 static bool calibrate_pending = false;   // set inside a callback, done from loop()
 static bool touch_uncalibrated = false;  // running on default data, nothing stored yet
 static bool calibration_offered = false; // the one automatic offer per boot has been made
+static bool click_enabled = false;       // layout setting `click`: a short beep on every press of an operable widget
+static bool portal_calibrate_req = false;// the "Touch kalibrieren" button on the hotspot screen (flag only)
 
 static void disp_flush(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *color_p) {
     display_flush(area->x1, area->y1, area->x2, area->y2, (const uint16_t *)&color_p->full);
@@ -47,6 +50,7 @@ static void touch_read(lv_indev_drv_t *drv, lv_indev_data_t *data) {
         if (!press_since) {
             press_since = millis() ? millis() : 1;
             press_x = x; press_y = y; press_moved = false;
+            if (click_enabled && widgets_input_at(x, y)) buzzer_click();
         } else if (abs((int)x - press_x) > 20 || abs((int)y - press_y) > 20) {
             press_moved = true;
         }
@@ -98,8 +102,9 @@ static bool boot_hold_requested() {
 // Blocking for at most about a minute: corner markers, then store the result (it is the same for every
 // rotation). Without any touch it gives up, keeps the default data and does not store anything (the next boot
 // offers it again).
-static void run_calibration() {
+static bool run_calibration() {
     uint16_t cal[8];
+    bool stored = false;
     Serial.println("[TOUCH] calibration started");
     display_fill_black();
     display_text_centered("Touch kalibrieren", display_width() / 2, display_height() / 2 - 24, 2, false);
@@ -108,12 +113,14 @@ static void run_calibration() {
     if (display_calibrate(cal, 60000)) {
         storage_save_touch(cal);
         touch_uncalibrated = false;
+        stored = true;
         Serial.println("[TOUCH] calibration stored");
     } else {
         Serial.println("[TOUCH] no touch within 60 s, keeping the current data");
     }
     display_fill_black();
     press_since = 0;
+    return stored;
 }
 
 // Never blocks without a user action: no stored data means default data and the normal start; the
@@ -224,14 +231,17 @@ static void screen_error(const char *msg) {
 }
 
 static void on_portal_cancel() { portal_cancel = true; }   // LVGL callback: act from loop()
+static void on_portal_calibrate() { portal_calibrate_req = true; }
+static char portal_note[96] = "";
 
 static void show_portal(const char *note) {
     status_screen = false;
     built_rev = -1; built_page = -1;
     portal_cancel = false;
     portal_opened = millis();
+    strlcpy(portal_note, note ? note : "", sizeof(portal_note));
     ui_show_provisioning(ap_ssid, provisioning_ap_pass(), "192.168.4.1",
-                         portal_cancelable ? on_portal_cancel : nullptr, note);
+                         portal_cancelable ? on_portal_cancel : nullptr, note, hw_cfg.touch_on ? on_portal_calibrate : nullptr);
 }
 
 // First boot (no saved WLAN) or opened by hand from a running page: the hotspot is all that runs.
@@ -326,10 +336,12 @@ static void on_frame(const char *type, JsonObjectConst ev) {
     if (ota_running()) return;
     if (strcmp(type, "options") == 0)   widgets_options(ev);
     else if (strcmp(type, "time") == 0) widgets_time(ev);
+    else if (strcmp(type, "beep") == 0) buzzer_play_json(ev["tones"].as<JsonArrayConst>());
 }
 
 static void on_layout(JsonObjectConst ev) {
     if (ota_running()) return;   // the update screen stays until the download is over
+    click_enabled = ev["settings"]["click"] | false;
     int brightness = ev["settings"]["brightness"] | 0;
     if (brightness > 0) set_brightness(brightness);
 
@@ -406,6 +418,7 @@ void setup() {
     Serial.printf("[BOOT] hardware configuration: %s%s\n", hw_stored ? "stored" : "defaults",
                   hw_dropped ? " (reset after repeated crashes)" : "");
     hw_print(hw_cfg);
+    buzzer_begin(hw_cfg.buzzer);
     Serial.println("[BOOT] stage: ota check");
     ota_boot_check();   // a new image that keeps failing is rolled back before it can do more harm
     Serial.println("[BOOT] stage: display");
@@ -435,6 +448,9 @@ void setup() {
 
 void loop() {
     hw_guard_poll();
+    buzzer_tick();
+    if (ota_running()) buzzer_stop();
+    if (state != RUNNING) click_enabled = false;   // the setting arrives with the next layout frame
     // First boot without stored touch data: offer the calibration once, but only when the panel is up and
     // talking to Home Assistant (never while the hotspot, OTA or a connection attempt needs the device).
     if (touch_uncalibrated && !calibration_offered && state == RUNNING && !portal_overlay && !ota_running() &&
@@ -449,6 +465,19 @@ void loop() {
     }
     lv_task_handler();
     ota_loop_tick(WiFi.status() == WL_CONNECTED);
+
+    // "Touch neu kalibrieren" from the setup page or the hotspot screen: run the calibration, then bring the
+    // hotspot screen back. The page asks for the outcome afterwards.
+    if ((state == PROVISIONING || portal_overlay) && hw_cfg.touch_on &&
+        (portal_calibrate_req || provisioning_calibrate_requested())) {
+        portal_calibrate_req = false;
+        provisioning_calibrate_state(1);
+        bool stored = run_calibration();
+        provisioning_calibrate_state(stored ? 2 : 3);
+        show_portal(portal_note);
+        press_since = 0;
+        return;
+    }
 
     // Long press on an empty spot (not on an operable widget, not a drag): WLAN setup. Pages without any
     // empty spot are covered by the automatic hotspot after 90 s without WLAN.

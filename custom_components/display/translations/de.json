@@ -47,12 +47,14 @@
           "data": {
             "name": "Name",
             "brightness": "Helligkeit",
-            "rotation": "Ausrichtung"
+            "rotation": "Ausrichtung",
+            "click": "Klick bei Berührung"
           },
           "data_description": {
             "name": "z. B. Küche",
             "brightness": "Stärke der Hintergrundbeleuchtung dieses Displays",
-            "rotation": "Wie das Display eingebaut ist. Probiere eine Einstellung aus, falls das Bild auf dem Kopf steht oder gedreht ist. Das Layout wird bei einem Wechsel automatisch angepasst; der Touch muss danach einmal neu kalibriert werden."
+            "rotation": "Wie das Display eingebaut ist. Probiere eine Einstellung aus, falls das Bild auf dem Kopf steht oder gedreht ist. Das Layout wird bei einem Wechsel automatisch angepasst; der Touch muss danach einmal neu kalibriert werden.",
+            "click": "Ein kurzer Klick vom Summer bei jeder Berührung eines Buttons, Schalters oder anderen Bedienelements (braucht den Summer auf der Platine). Lässt sich auch im Editor umschalten."
           }
         },
         "reconfigure": {
@@ -61,13 +63,15 @@
             "name": "Name",
             "brightness": "Helligkeit",
             "new_key": "Neuen Gerätecode erzeugen",
-            "rotation": "Ausrichtung"
+            "rotation": "Ausrichtung",
+            "click": "Klick bei Berührung"
           },
           "data_description": {
             "name": "Der Name kommt vom Server - das Display muss nicht angepasst werden.",
             "brightness": "Stärke der Hintergrundbeleuchtung dieses Displays",
             "new_key": "Sperrt das Display mit dem alten Code aus; es muss danach neu eingerichtet werden.",
-            "rotation": "Wie das Display eingebaut ist. Probiere eine Einstellung aus, falls das Bild auf dem Kopf steht oder gedreht ist. Das Layout wird bei einem Wechsel automatisch angepasst; der Touch muss danach einmal neu kalibriert werden."
+            "rotation": "Wie das Display eingebaut ist. Probiere eine Einstellung aus, falls das Bild auf dem Kopf steht oder gedreht ist. Das Layout wird bei einem Wechsel automatisch angepasst; der Touch muss danach einmal neu kalibriert werden.",
+            "click": "Ein kurzer Klick vom Summer bei jeder Berührung eines Buttons, Schalters oder anderen Bedienelements (braucht den Summer auf der Platine). Lässt sich auch im Editor umschalten."
           }
         }
       },
@@ -101,6 +105,51 @@
         "2": "Querformat gedreht (180°)",
         "3": "Hochformat gedreht (270°)"
       }
+    },
+    "beep_preset": {
+      "options": {
+        "click": "Klick",
+        "notify": "Hinweis",
+        "alert": "Alarm",
+        "doorbell": "Türklingel",
+        "success": "Erfolg",
+        "error": "Fehler"
+      }
+    }
+  },
+  "services": {
+    "beep": {
+      "name": "Signalton",
+      "description": "Spielt einen Ton auf dem Summer eines Displays.",
+      "fields": {
+        "preset": {
+          "name": "Vorlage",
+          "description": "Ein fertiger Klang. Ist sie gesetzt, werden Frequenz und Dauer ignoriert."
+        },
+        "frequency": {
+          "name": "Frequenz",
+          "description": "Tonhöhe in Hz (100 bis 5000). Der Summer ist bei etwa 2000 bis 3000 Hz am lautesten."
+        },
+        "duration_ms": {
+          "name": "Dauer",
+          "description": "Länge des Tons in Millisekunden (10 bis 2000)."
+        },
+        "repeat": {
+          "name": "Wiederholungen",
+          "description": "Wie oft der Klang gespielt wird (1 bis 10, mit kurzer Pause dazwischen). Alles zusammen höchstens 5 Sekunden."
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "display_offline": {
+      "message": "Das Display {name} ist nicht verbunden."
+    },
+    "not_a_display": {
+      "message": "{target} ist kein ESP32-Display."
+    },
+    "no_target": {
+      "message": "Wähle ein Display (Gerät oder eine seiner Entitäten)."
     }
   }
 }

@@ -1,13 +1,13 @@
 # Panel protocol (v0.4)
 
 WebSocket `/api/display/ws`, JSON text frames. Panel -> server: `hello`, `tap`, `set`, `act`, `page`, `ota_status`.
-Server -> panel: `layout`, `states`, `options`, `time`, `ota`, `error`. Unknown message types and unknown
+Server -> panel: `layout`, `states`, `options`, `time`, `beep`, `ota`, `error`. Unknown message types and unknown
 widget fields must be ignored by the firmware.
 
 ## Layout frame
 
 ```
-{"type":"layout","name":..,"rev":..,"settings":{"brightness":..,"rotation":..},"screen":{"w":..,"h":..},
+{"type":"layout","name":..,"rev":..,"settings":{"brightness":..,"rotation":..,"click":bool},"screen":{"w":..,"h":..},
  "page":{"index":..,"count":..,"name":..,"bg":"#rrggbb"?}, "pager":{...}|null, "widgets":[...]}
 ```
 
@@ -100,6 +100,18 @@ and whenever the list changes. Item text is the value sent back in `set{option}`
 `{"type":"time","epoch":1732450000,"offset":3600}` - UTC seconds and the local UTC offset in seconds (includes DST).
 Sent after the layout and every 5 minutes, but only while the page has a `clock` widget. The firmware keeps a local clock (epoch + offset + millis since the
 frame); no NTP. Until the first frame a clock shows `--:--`.
+
+## Beep frame (buzzer)
+
+`{"type":"beep","tones":[[2500,20],[0,60],[1800,120]]}` - a tone sequence for the buzzer: a list of `[hz, ms]`
+steps, `hz` 0 is a pause. The server sends at most 16 steps, each at most 2000 ms, 5000 ms in total, frequencies
+0 or 100..5000 Hz (home assistant service `display.beep`). The firmware clamps again with the same limits, a new
+`beep` replaces a running one, and nothing plays while a firmware update runs or when the panel has no buzzer
+(hardware setting `buzzer`, default GPIO 26, -1 = none). Older firmware ignores the frame.
+
+`settings.click` (bool, default false): the panel plays a 20 ms click (2500 Hz) on every touch-down on an operable
+widget or on the page switcher. It is a setting of the display (device form / the editor's "Tastenton" box), not of
+the layout.
 
 ## Panel -> server
 

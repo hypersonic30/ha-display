@@ -181,7 +181,42 @@ Das Einrichtungsportal öffnet sich wieder:
 - **automatisch**, wenn 90 Sekunden lang kein gespeichertes WLAN erreichbar ist (das Display versucht es im Hintergrund weiter und schließt das Portal, sobald ein Netz wieder da ist),
 - **per langem Druck** (3 Sekunden) auf eine leere Stelle der Seite, also dort, wo kein bedienbares Element liegt. „Abbrechen“ oder 5 Minuten ohne Eingabe führen zurück in den Normalbetrieb.
 
-Im Portal (WLAN des Displays, Adresse `192.168.4.1`) lassen sich WLANs hinzufügen und entfernen sowie die HA-URL ändern. Den Netzwerknamen kannst du **frei eintippen**; das Netz muss nicht erreichbar sein. Das ist wichtig für einen **Handy-Hotspot**: Das iPhone schaltet ihn ab, sobald du dich mit dem Display verbindest. Name von Hand eintragen, speichern, Hotspot wieder einschalten (iPhone: Hotspot-Einstellungen geöffnet lassen, „Kompatibilität maximieren“ an, nur 2,4 GHz). Details und Grenzen: [docs/wifi.md](docs/wifi.md).
+Im Portal (WLAN des Displays, Adresse `192.168.4.1`) lassen sich WLANs hinzufügen und entfernen, die HA-URL ändern und der **Touch neu kalibrieren** (auch direkt am Display über den Knopf „Touch kalibrieren“ auf dem Einrichtungsbildschirm). Den Netzwerknamen kannst du **frei eintippen**; das Netz muss nicht erreichbar sein. Das ist wichtig für einen **Handy-Hotspot**: Das iPhone schaltet ihn ab, sobald du dich mit dem Display verbindest. Name von Hand eintragen, speichern, Hotspot wieder einschalten (iPhone: Hotspot-Einstellungen geöffnet lassen, „Kompatibilität maximieren“ an, nur 2,4 GHz). Details und Grenzen: [docs/wifi.md](docs/wifi.md).
+
+## Signalton (Summer)
+
+Hat das Board einen Summer (im Schaltplan `PIEZO`, Standard GPIO 26, im Portal unter „Hardware“ einstellbar),
+kann Home Assistant Töne darauf spielen:
+
+```yaml
+action: display.beep
+target:
+  device_id: <das Display>      # oder entity_id einer Entität des Displays
+data:
+  preset: doorbell              # click, notify, alert, doorbell, success oder error
+```
+
+Statt `preset` geht auch ein eigener Ton: `frequency` (100–5000 Hz), `duration_ms` (10–2000) und `repeat` (1–10).
+Eine Vorlage hat Vorrang vor Frequenz und Dauer; alles zusammen dauert höchstens 5 Sekunden. Ist das Display nicht
+verbunden, meldet der Dienst einen Fehler. Beispiel für eine Automatisierung:
+
+```yaml
+automation:
+  - alias: Türklingel am Display
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.haustuer_klingel
+        to: "on"
+    actions:
+      - action: display.beep
+        target:
+          entity_id: binary_sensor.wohnzimmer_connected
+        data:
+          preset: doorbell
+```
+
+**Tastenton:** Im Editor (Haken „Tastenton“ in der Kopfzeile) oder im Geräteformular des Displays gibt es bei jeder
+Berührung eines Bedienelements einen kurzen Klick. Die Einstellung gilt für das Display, nicht für das Layout.
 
 ## HTTPS und Zertifikatsprüfung
 

@@ -25,6 +25,7 @@ from homeassistant.helpers.selector import (
 
 from .const import (
     CONF_BRIGHTNESS,
+    CONF_CLICK,
     CONF_DEVICE_KEY,
     CONF_HA_URL,
     CONF_NAME,
@@ -116,7 +117,7 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
             elif key in others:
                 errors[CONF_NAME] = "name_taken"
             if not errors:
-                data = {CONF_BRIGHTNESS: int(user_input[CONF_BRIGHTNESS]), CONF_ROTATION: int(user_input[CONF_ROTATION]), CONF_DEVICE_KEY: sub.data[CONF_DEVICE_KEY] if sub else new_device_key()}
+                data = {CONF_BRIGHTNESS: int(user_input[CONF_BRIGHTNESS]), CONF_ROTATION: int(user_input[CONF_ROTATION]), CONF_CLICK: bool(user_input.get(CONF_CLICK, False)), CONF_DEVICE_KEY: sub.data[CONF_DEVICE_KEY] if sub else new_device_key()}
                 if sub is not None and user_input.get(CONF_NEW_KEY):
                     data[CONF_DEVICE_KEY] = new_device_key()
                 if sub is not None:
@@ -126,6 +127,7 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
             CONF_NAME: sub.title if sub else "",
             CONF_BRIGHTNESS: sub.data.get(CONF_BRIGHTNESS, DEFAULT_BRIGHTNESS) if sub else DEFAULT_BRIGHTNESS,
             CONF_ROTATION: str(sub.data.get(CONF_ROTATION, DEFAULT_ROTATION)) if sub else str(DEFAULT_ROTATION),
+            CONF_CLICK: bool(sub.data.get(CONF_CLICK, False)) if sub else False,
         }
         shown.update(user_input or {})
         fields: dict = {
@@ -136,6 +138,7 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
             vol.Required(CONF_ROTATION, default=str(shown[CONF_ROTATION])): SelectSelector(
                 SelectSelectorConfig(options=["0", "1", "2", "3"], translation_key="rotation", mode=SelectSelectorMode.DROPDOWN)
             ),
+            vol.Required(CONF_CLICK, default=bool(shown[CONF_CLICK])): bool,
         }
         if sub is not None:
             fields[vol.Required(CONF_NEW_KEY, default=False)] = bool

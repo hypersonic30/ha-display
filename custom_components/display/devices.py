@@ -10,6 +10,7 @@ from homeassistant.util import slugify
 
 from .const import (
     CONF_BRIGHTNESS,
+    CONF_CLICK,
     CONF_DEVICE_KEY,
     CONF_ROTATION,
     DEFAULT_BRIGHTNESS,
@@ -50,6 +51,11 @@ def find_by_key(entry: ConfigEntry, key: str) -> ConfigSubentry | None:
 
 def brightness_of(sub: ConfigSubentry) -> int:
     return int(sub.data.get(CONF_BRIGHTNESS, DEFAULT_BRIGHTNESS))
+
+
+def click_of(sub: ConfigSubentry) -> bool:
+    """Short click on every press of an operable widget (needs the buzzer)."""
+    return bool(sub.data.get(CONF_CLICK, False))
 
 
 def rotation_of(sub: ConfigSubentry) -> int:

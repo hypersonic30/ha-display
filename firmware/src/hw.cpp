@@ -7,7 +7,7 @@
 #endif
 
 static const char *NS = "display";
-static const uint8_t HW_VER = 1;
+static const uint8_t HW_VER = 2;     // 2: + buzzer pin (a stored version 1 is read, the buzzer gets its default)
 
 const char *hw_panel_name(uint8_t panel) {
     switch (panel) {
@@ -38,6 +38,7 @@ void hw_defaults(HwConfig &c) {
     c.cs = 15; c.dc = 2; c.rst = 4;
     c.bl = 32; c.bl_invert = 0;
     c.touch_on = 1; c.touch_cs = 14; c.touch_irq = -1;
+    c.buzzer = 26;
     hw_preset(c, HW_DEFAULT_PANEL);
 }
 
@@ -58,6 +59,7 @@ const char *hw_validate(const HwConfig &c) {
         {c.bl, true, false, "Backlight"},
         {c.touch_on ? c.touch_cs : (int8_t)-1, !c.touch_on, false, "Touch-CS"},
         {c.touch_on ? c.touch_irq : (int8_t)-1, true, true, "Touch-IRQ"},
+        {c.buzzer, true, false, "Summer"},
     };
     static char msg[64];
     for (size_t i = 0; i < sizeof(pins) / sizeof(pins[0]); i++) {
@@ -88,8 +90,15 @@ bool hw_load(HwConfig &c) {
     Preferences p;
     p.begin(NS, true);
     HwConfig s;
-    bool ok = p.getBytesLength("hw_cfg") == sizeof(s) && p.getBytes("hw_cfg", &s, sizeof(s)) == sizeof(s) &&
-              s.ver == HW_VER;
+    memset(&s, 0, sizeof(s));
+    size_t len = p.getBytesLength("hw_cfg");
+    bool ok = false;
+    if (len == sizeof(s)) {
+        ok = p.getBytes("hw_cfg", &s, sizeof(s)) == sizeof(s) && s.ver == HW_VER;
+    } else if (len == sizeof(s) - 1) {          // layout version 1: the same fields without the buzzer
+        ok = p.getBytes("hw_cfg", &s, len) == len && s.ver == 1;
+        if (ok) { s.ver = HW_VER; s.buzzer = c.buzzer; }
+    }
     p.end();
     if (!ok) return false;
     if (hw_validate(s)) {
@@ -121,9 +130,9 @@ void hw_reset_stored() {
 void hw_print(const HwConfig &c) {
     Serial.printf("[HW] panel %s, SPI write %u MHz read %u MHz, colour %s, inversion %s\n", hw_panel_name(c.panel),
                   c.write_mhz, c.read_mhz, c.bgr ? "BGR" : "RGB", c.invert ? "on" : "off");
-    Serial.printf("[HW] MOSI=%d SCLK=%d MISO=%d CS=%d DC=%d RST=%d BL=%d%s, touch %s CS=%d IRQ=%d\n", c.mosi, c.sclk,
-                  c.miso, c.cs, c.dc, c.rst, c.bl, c.bl_invert ? " (inverted)" : "", c.touch_on ? "on" : "off",
-                  c.touch_cs, c.touch_irq);
+    Serial.printf("[HW] MOSI=%d SCLK=%d MISO=%d CS=%d DC=%d RST=%d BL=%d%s, touch %s CS=%d IRQ=%d, buzzer=%d\n", c.mosi,
+                  c.sclk, c.miso, c.cs, c.dc, c.rst, c.bl, c.bl_invert ? " (inverted)" : "", c.touch_on ? "on" : "off",
+                  c.touch_cs, c.touch_irq, c.buzzer);
 }
 
 // ── Recovery ──────────────────────────────────────────────────────────────────

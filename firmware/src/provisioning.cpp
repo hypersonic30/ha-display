@@ -5,6 +5,7 @@
 #include <ArduinoJson.h>
 #include <lvgl.h>
 #include "hw.h"
+#include "buzzer.h"
 #include "display.h"
 
 static WebServer  server(80);
@@ -12,6 +13,8 @@ static DNSServer  dns;
 static Config     saved_cfg;
 static Config     cur_cfg;      // what is stored right now (read only, for the page)
 static bool       cfg_ready = false;
+static bool       cal_requested = false;
+static int        cal_state = 0;   // 0 idle, 1 running, 2 stored, 3 no touch
 static char       ap_pass[9];
 
 static String trimmed(const char *s) {
@@ -110,6 +113,13 @@ details.card[open] summary{margin-bottom:12px}
   <div class="status" id="st"></div>
 </form>
 
+<div class="card" id="touchbox">
+  <h2>Touch</h2>
+  <p class="hint">Trifft der Touch daneben oder ist er seitenverkehrt? Dann neu kalibrieren: Das Display zeigt vier Markierungen, die du nacheinander in den Ecken antippst. Das geht auch direkt am Display über &bdquo;Touch kalibrieren&ldquo; auf dem Einrichtungsbildschirm.</p>
+  <button type="button" class="add-btn" id="calbtn" onclick="calStart()">Touch neu kalibrieren</button>
+  <div class="status" id="calst"></div>
+</div>
+
 <details class="card" id="hwbox">
   <summary class="hwsum">Hardware (Display &amp; Touch) &ndash; nur bei Bedarf</summary>
   <p class="hint warn">Falsche Werte lassen das Display schwarz. Das Einrichtungs-WLAN funktioniert trotzdem. Zurück zu den Standardwerten: unten &bdquo;Auf Standard zurücksetzen&ldquo;, oder die BOOT-Taste in den ersten 30 Sekunden nach dem Einschalten 3 Sekunden halten. Nach drei Abstürzen direkt nach dem Start werden die Standardwerte ebenfalls wiederhergestellt.</p>
@@ -123,6 +133,7 @@ details.card[open] summary{margin-bottom:12px}
     <div><label>DC (RS)</label><input id="hw_dc" type="number" min="0" max="39"></div>
     <div><label>RESET (-1 = keiner)</label><input id="hw_rst" type="number" min="-1" max="39"></div>
     <div><label>Backlight (-1 = keiner)</label><input id="hw_bl" type="number" min="-1" max="39"></div>
+    <div><label>Summer (-1 = keiner)</label><input id="hw_buzzer" type="number" min="-1" max="39"></div>
     <div><label>Schreibtakt (MHz)</label><input id="hw_write_mhz" type="number" min="1" max="40"></div>
     <div><label>Lesetakt (MHz)</label><input id="hw_read_mhz" type="number" min="1" max="20"></div>
   </div>
@@ -183,7 +194,7 @@ async function scan(){
 }
 
 
-const HWPINS=['mosi','sclk','miso','cs','dc','rst','bl','write_mhz','read_mhz','touch_cs','touch_irq'];
+const HWPINS=['mosi','sclk','miso','cs','dc','rst','bl','buzzer','write_mhz','read_mhz','touch_cs','touch_irq'];
 const HWFLAGS=['bl_invert','bgr','invert','touch_on'];
 let hwPresets=[];
 function hwStatus(msg,cls){const e=document.getElementById('hwst');e.className='status '+cls;e.innerHTML=msg}
@@ -230,6 +241,28 @@ async function hwReset(){
   if(!confirm('Hardware-Einstellungen auf Standard zurücksetzen? Das Display startet neu.'))return;
   const j=await hwPost('/hw/reset',{},'Setze zurück...');
   if(j)hwStatus('Standardwerte gesetzt. Das Display startet neu.','ok');
+}
+function calStatus(msg,cls){const e=document.getElementById('calst');e.className='status '+cls;e.innerHTML=msg}
+async function calStart(){
+  const btn=document.getElementById('calbtn');
+  btn.disabled=true;
+  calStatus('<span class="spinner"></span>Bitte die vier Ecken am Display antippen (eine nach der anderen). Dafür bleiben 60 Sekunden Zeit.','info');
+  try{
+    const r=await fetch('/touch/calibrate',{method:'POST'});
+    const j=await r.json();
+    if(!j.ok){calStatus('Fehler: '+(j.error||'Unbekannt'),'err');btn.disabled=false;return}
+  }catch(e){calStatus('Keine Antwort vom Display','err');btn.disabled=false;return}
+  // The display does not answer while it waits for the taps: keep asking until it is back.
+  for(let i=0;i<60;i++){
+    await new Promise(res=>setTimeout(res,2000));
+    try{
+      const s=await (await fetch('/touch/state')).json();
+      if(s.state===2){calStatus('Kalibrierung gespeichert. Der Touch sollte jetzt treffen.','ok');btn.disabled=false;return}
+      if(s.state===3){calStatus('Es wurde nichts angetippt, die bisherigen Werte bleiben.','err');btn.disabled=false;return}
+    }catch(e){}
+  }
+  calStatus('Keine Rückmeldung. Prüfe das Display und versuche es noch einmal.','err');
+  btn.disabled=false;
 }
 async function hwTest(){
   const j=await hwPost('/hw/test',{},'Test läuft: Rot, Grün, Blau, Weiß ...');
@@ -402,7 +435,7 @@ static void hw_to_json(const HwConfig &c, JsonObject o) {
     o["cs"] = c.cs; o["dc"] = c.dc; o["rst"] = c.rst; o["bl"] = c.bl;
     o["bl_invert"] = c.bl_invert; o["write_mhz"] = c.write_mhz; o["read_mhz"] = c.read_mhz;
     o["touch_on"] = c.touch_on; o["touch_cs"] = c.touch_cs; o["touch_irq"] = c.touch_irq;
-    o["bgr"] = c.bgr; o["invert"] = c.invert;
+    o["bgr"] = c.bgr; o["invert"] = c.invert; o["buzzer"] = c.buzzer;
 }
 
 static void handle_hw_get() {
@@ -439,6 +472,7 @@ static void handle_hw_save() {
     c.touch_on  = doc["touch_on"] | c.touch_on;
     c.touch_cs  = doc["touch_cs"] | c.touch_cs;     c.touch_irq = doc["touch_irq"] | c.touch_irq;
     c.bgr       = doc["bgr"] | c.bgr;               c.invert = doc["invert"] | c.invert;
+    c.buzzer    = doc["buzzer"] | c.buzzer;
     if (const char *why = hw_validate(c)) return fail(why);
     if (!hw_save(c)) return fail("Speichern fehlgeschlagen");
     send_json(200, "{\"ok\":true}");
@@ -458,7 +492,27 @@ static void handle_hw_reset() {
 static void handle_hw_test() {
     display_test();
     lv_obj_invalidate(lv_scr_act());   // LVGL redraws the portal screen
+    if (buzzer_present()) {            // a short double beep: a wired buzzer answers right away
+        static const BeepStep test[] = {{1800, 120}, {0, 70}, {2400, 160}};
+        buzzer_play(test, 3);
+    }
     send_json(200, "{\"ok\":true}");
+}
+
+static void handle_touch_calibrate() {
+    HwConfig c;
+    hw_load(c);
+    if (!c.touch_on) return fail("Touch ist in den Hardware-Einstellungen ausgeschaltet");
+    if (cal_state == 1) return fail("Die Kalibrierung läuft schon");
+    cal_requested = true;
+    cal_state = 1;
+    send_json(200, "{\"ok\":true}");   // answered first: the display is busy waiting for taps afterwards
+}
+
+static void handle_touch_state() {
+    char out[24];
+    snprintf(out, sizeof(out), "{\"state\":%d}", cal_state);
+    send_json(200, out);
 }
 
 // ── Captive portal redirect ───────────────────────────────────────────────────
@@ -472,6 +526,8 @@ static void handle_captive() {
 
 void provisioning_begin(const char *ap_ssid, const Config *current) {
     cfg_ready = false;
+    cal_requested = false;
+    cal_state = 0;
     memset(&cur_cfg, 0, sizeof(cur_cfg));
     cur_cfg.tls_verify = true;
     if (current) cur_cfg = *current;
@@ -498,6 +554,8 @@ void provisioning_begin(const char *ap_ssid, const Config *current) {
         server.on("/hw",       HTTP_POST, handle_hw_save);
         server.on("/hw/reset", HTTP_POST, handle_hw_reset);
         server.on("/hw/test",  HTTP_POST, handle_hw_test);
+        server.on("/touch/calibrate", HTTP_POST, handle_touch_calibrate);
+        server.on("/touch/state",     HTTP_GET,  handle_touch_state);
         // Captive portal endpoints (Android, Windows, iOS)
         server.on("/generate_204",              handle_captive);
         server.on("/connecttest.txt",           handle_captive);
@@ -518,6 +576,16 @@ const char *provisioning_ap_pass() {
 void provisioning_handle() {
     dns.processNextRequest();
     server.handleClient();
+}
+
+bool provisioning_calibrate_requested() {
+    bool r = cal_requested;
+    cal_requested = false;
+    return r;
+}
+
+void provisioning_calibrate_state(int state) {
+    cal_state = state;
 }
 
 bool provisioning_done() {

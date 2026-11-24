@@ -3,6 +3,7 @@ from homeassistant.data_entry_flow import FlowResultType
 
 from custom_components.display.const import (
     CONF_BRIGHTNESS,
+    CONF_CLICK,
     CONF_DEVICE_KEY,
     CONF_HA_URL,
     CONF_NAME,
@@ -88,7 +89,7 @@ async def test_editing_a_display_keeps_its_key_unless_renewed(hass, make_entry):
     done = await reconfigure(**{CONF_NEW_KEY: False})
     assert done["type"] is FlowResultType.ABORT and done["reason"] == "reconfigure_successful"
     assert entry.subentries[sub.subentry_id].title == "KÜCHE"
-    assert entry.subentries[sub.subentry_id].data == {CONF_BRIGHTNESS: 25, CONF_ROTATION: 0, CONF_DEVICE_KEY: "old-key"}
+    assert entry.subentries[sub.subentry_id].data == {CONF_BRIGHTNESS: 25, CONF_ROTATION: 0, CONF_CLICK: False, CONF_DEVICE_KEY: "old-key"}
 
     await reconfigure(**{CONF_NEW_KEY: True})
     fresh = entry.subentries[sub.subentry_id].data[CONF_DEVICE_KEY]
@@ -150,3 +151,20 @@ async def test_sidebar_choice_is_part_of_the_connection_form(hass):
     assert "sidebar" in result["data_schema"].schema
     done = await hass.config_entries.flow.async_configure(result["flow_id"], {"ha_url": "http://ha.test:8123/", "sidebar": False})
     assert done["data"] == {"ha_url": "http://ha.test:8123", "sidebar": False}
+
+
+async def test_the_click_setting_is_stored_with_the_display(hass, make_entry):
+    entry = make_entry(device("Küche"))
+    flow = hass.config_entries.subentries
+    result = await flow.async_init((entry.entry_id, SUBENTRY_DEVICE), context={"source": config_entries.SOURCE_USER})
+    done = await flow.async_configure(result["flow_id"], {CONF_NAME: "Flur", CONF_BRIGHTNESS: 50, CONF_CLICK: True})
+    assert done["type"] is FlowResultType.CREATE_ENTRY
+    sub = next(s for s in entry.subentries.values() if s.title == "Flur")
+    assert sub.data[CONF_CLICK] is True
+
+    again = await flow.async_init(
+        (entry.entry_id, SUBENTRY_DEVICE), context={"source": config_entries.SOURCE_RECONFIGURE, "subentry_id": sub.subentry_id}
+    )
+    done = await flow.async_configure(again["flow_id"], {CONF_NAME: "Flur", CONF_BRIGHTNESS: 50, CONF_ROTATION: "0", CONF_NEW_KEY: False, CONF_CLICK: False})
+    assert done["type"] is FlowResultType.ABORT
+    assert entry.subentries[sub.subentry_id].data[CONF_CLICK] is False

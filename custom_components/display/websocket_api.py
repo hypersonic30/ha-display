@@ -6,10 +6,10 @@ import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 
-from .const import CONF_DEVICE_KEY, CONF_HA_URL, DOMAIN
+from .const import CONF_CLICK, CONF_DEVICE_KEY, CONF_HA_URL, DOMAIN
 from homeassistant.helpers import entity_registry as er
 
-from .devices import brightness_of, device_subentries, get_entry, rotation_of, screen_size
+from .devices import brightness_of, click_of, device_subentries, get_entry, rotation_of, screen_size
 from .firmware import bundle_of
 from .layouts import LayoutStore, validate_layout
 
@@ -32,7 +32,7 @@ def _payload(hass: HomeAssistant, device_id: str) -> dict | None:
         "pages": layout["pages"],
         "pager": layout["pager"],
         "screen": {"w": width, "h": height},
-        "settings": {"brightness": brightness_of(sub), "rotation": rotation_of(sub)},
+        "settings": {"brightness": brightness_of(sub), "rotation": rotation_of(sub), "click": click_of(sub)},
     }
 
 
@@ -47,7 +47,7 @@ def _resolve(hass: HomeAssistant, connection, msg):
 
 @callback
 def async_register(hass: HomeAssistant) -> None:
-    for command in (ws_devices, ws_layout_get, ws_layout_set, ws_setup_info):
+    for command in (ws_devices, ws_layout_get, ws_layout_set, ws_setup_info, ws_settings_set):
         websocket_api.async_register_command(hass, command)
 
 
@@ -118,3 +118,16 @@ def ws_setup_info(hass: HomeAssistant, connection: websocket_api.ActiveConnectio
         return
     entry = get_entry(hass)
     connection.send_result(msg["id"], {"name": sub.title, CONF_HA_URL: entry.data[CONF_HA_URL], CONF_DEVICE_KEY: sub.data[CONF_DEVICE_KEY]})
+
+
+@websocket_api.websocket_command({vol.Required("type"): "display/settings/set", vol.Required("device_id"): str, vol.Required("click"): bool})
+@websocket_api.require_admin
+@callback
+def ws_settings_set(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """The click setting of one display ('Tastenton'); the connected panel gets it right away."""
+    sub = _resolve(hass, connection, msg)
+    if sub is None:
+        return
+    entry = get_entry(hass)
+    hass.config_entries.async_update_subentry(entry, sub, data={**sub.data, CONF_CLICK: msg["click"]})
+    connection.send_result(msg["id"], _payload(hass, msg["device_id"]))

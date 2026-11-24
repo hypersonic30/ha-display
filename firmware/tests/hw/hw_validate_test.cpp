@@ -28,6 +28,15 @@ int main() {
     d = c; d.touch_on = 0; d.touch_cs = -1; CHECK(hw_validate(d) == nullptr);
     d = c; d.mosi = 24;  CHECK(hw_validate(d));       // does not exist
     d = c; d.mosi = 40;  CHECK(hw_validate(d));
+    // buzzer pin: optional, an output pin, no duplicates
+    CHECK(c.buzzer == 26);                              // the author's board
+    d = c; d.buzzer = -1;  CHECK(hw_validate(d) == nullptr);
+    d = c; d.buzzer = 27;  CHECK(hw_validate(d) == nullptr);
+    d = c; d.buzzer = 34;  CHECK(hw_validate(d));       // input only
+    d = c; d.buzzer = 6;   CHECK(hw_validate(d));       // flash
+    d = c; d.buzzer = 0;   CHECK(hw_validate(d));       // BOOT
+    d = c; d.buzzer = 32;  CHECK(hw_validate(d));       // backlight
+    d = c; d.buzzer = 14;  CHECK(hw_validate(d));       // touch CS
     printf("%s\n", fails ? "FAILED" : "all ok");
     return fails != 0;
 }

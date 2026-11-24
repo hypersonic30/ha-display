@@ -31,7 +31,7 @@ from .const import (
     OPTIONS_MAX,
     THERMOSTAT_ACTIONS,
 )
-from .devices import brightness_of, find_by_key, get_entry, rotation_of, screen_size
+from .devices import brightness_of, click_of, find_by_key, get_entry, rotation_of, screen_size
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -190,7 +190,7 @@ class PanelSession:
             "type": "layout",
             "name": sub.title,
             "rev": layout["rev"],
-            "settings": {"brightness": brightness_of(sub), "rotation": rotation_of(sub)},
+            "settings": {"brightness": brightness_of(sub), "rotation": rotation_of(sub), "click": click_of(sub)},
             "screen": {"w": width, "h": height},
             "page": info,
             # Only worth showing when there is somewhere to go.
@@ -285,6 +285,10 @@ class PanelSession:
         count = len(self._store.get(self.device_id)["pages"])
         self._page = (self._page + (1 if direction == "next" else -1)) % count
         await self.send_layout()
+
+    async def beep(self, tones: list[list[int]]) -> None:
+        """Play a tone sequence on the panel's buzzer (already clamped by beep.build_tones)."""
+        await self._send({"type": "beep", "tones": tones})
 
     async def start_ota(self, version: str, info: dict) -> None:
         await self._send(

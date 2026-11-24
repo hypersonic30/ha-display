@@ -1,0 +1,47 @@
+beep:
+  target:
+    device:
+      integration: display
+    entity:
+      integration: display
+  fields:
+    preset:
+      required: false
+      selector:
+        select:
+          translation_key: beep_preset
+          options:
+            - click
+            - notify
+            - alert
+            - doorbell
+            - success
+            - error
+    frequency:
+      required: false
+      default: 2000
+      selector:
+        number:
+          min: 100
+          max: 5000
+          step: 50
+          unit_of_measurement: Hz
+          mode: box
+    duration_ms:
+      required: false
+      default: 200
+      selector:
+        number:
+          min: 10
+          max: 2000
+          step: 10
+          unit_of_measurement: ms
+          mode: box
+    repeat:
+      required: false
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 10
+          mode: box

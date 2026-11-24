@@ -3,15 +3,15 @@
   "variants": {
     "ili9488": {
       "file": "firmware-ili9488.bin",
-      "size": 1644576,
-      "md5": "d7bfd24adf919b794db6ceded7e2931a",
-      "sha256": "9029e92287c0647984d21597ba36c468584fd70b8c2272be7bda0bac589188d9"
+      "size": 1649968,
+      "md5": "374287a8f766f2a6c72a8246f9279a4a",
+      "sha256": "5576a7899c27e4bb7e5af26468fa8178951936f3bf1c104e3a7fabf7c56f910f"
     },
     "ili9481": {
       "file": "firmware-ili9481.bin",
-      "size": 1644576,
-      "md5": "f3143f3b1e0f31da3ae0419f6d49204e",
-      "sha256": "77fd04d88ee062a0a9a05853178014691f4bc2ec3859d432107868b9d028bde5"
+      "size": 1649968,
+      "md5": "866db14e7cde61d02c8eef5b4471a30a",
+      "sha256": "0e7ffe8fbc4106725b8514a7bcd8662b3329869ffa4fbc335c2a5f9d79b3644a"
     }
   }
 }

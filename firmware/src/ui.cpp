@@ -12,6 +12,7 @@ static const lv_color_t C_ERR    = LV_COLOR_MAKE(0xef, 0x53, 0x50);
 static const char *HOLD_HINT = "Leere Stelle 3 s halten: WLAN & Setup";
 
 static void (*cancel_cb)() = nullptr;
+static void (*calibrate_cb)() = nullptr;
 
 static lv_obj_t *update_bar = nullptr;
 static lv_obj_t *update_pct = nullptr;
@@ -62,10 +63,15 @@ static void cb_cancel(lv_event_t *) {
     if (cancel_cb) cancel_cb();
 }
 
+static void cb_calibrate(lv_event_t *) {
+    if (calibrate_cb) calibrate_cb();
+}
+
 void ui_show_provisioning(const char *ap_ssid, const char *ap_pass, const char *url,
-                          void (*on_cancel)(), const char *note) {
+                          void (*on_cancel)(), const char *note, void (*on_calibrate)()) {
     clear_screen();
     cancel_cb = on_cancel;
+    calibrate_cb = on_calibrate;
     lv_obj_t *scr = lv_scr_act();
     const int W = scr_w(), H = scr_h();
 
@@ -119,6 +125,17 @@ void ui_show_provisioning(const char *ap_ssid, const char *ap_pass, const char *
     left(url, &ui_font_20, C_ACCENT);
 
     if (note && note[0]) left(note, &ui_font_12, C_MUTED);
+
+    if (on_calibrate) {
+        lv_obj_t *btn = lv_btn_create(card);
+        lv_obj_set_size(btn, 170, 30);
+        lv_obj_set_style_bg_color(btn, C_BG, LV_PART_MAIN);
+        lv_obj_set_style_border_width(btn, 1, LV_PART_MAIN);
+        lv_obj_set_style_border_color(btn, C_MUTED, LV_PART_MAIN);
+        lv_obj_add_event_cb(btn, cb_calibrate, LV_EVENT_CLICKED, nullptr);
+        lv_obj_t *bl = make_label(btn, "Touch kalibrieren", &ui_font_14, C_WHITE);
+        lv_obj_center(bl);
+    }
 }
 
 // ── Connecting screen ─────────────────────────────────────────────────────────

@@ -79,7 +79,8 @@ def mount(pg, stub, config=None, states=STATES):
       const store = stub.store;
       window.__stub = {
         "display/devices": () => stub.devices,
-        "display/layout/get": (m) => ({ name: "x", rev: 1, ...store[m.device_id], screen: stub.screens[m.device_id] || { w: 480, h: 320 }, settings: { brightness: 80, rotation: 0 } }),
+        "display/layout/get": (m) => ({ name: "x", rev: 1, ...store[m.device_id], screen: stub.screens[m.device_id] || { w: 480, h: 320 }, settings: { brightness: 80, rotation: 0, click: !!(stub.click || {})[m.device_id] } }),
+        "display/settings/set": (m) => { if (stub.settingsError) throw { code: "unauthorized", message: "Unauthorized" }; (stub.click = stub.click || {})[m.device_id] = m.click; return { settings: { click: m.click } }; },
         "display/layout/set": (m) => { if (stub.saveError) throw { code: "invalid_format", message: stub.saveError }; store[m.device_id] = { pages: m.pages, pager: m.pager }; return { rev: 2, name: "x", pages: m.pages, pager: m.pager, screen: stub.screens[m.device_id] || { w: 480, h: 320 }, settings: { brightness: 80, rotation: 0 } }; },
         "display/setup_info": (m) => { if (stub.notAdmin) throw { code: "unauthorized", message: "Unauthorized" }; return { name: "Küche", ha_url: "http://ha:8123", device_key: "SECRET-KEY_1" }; },
       };
@@ -379,6 +380,25 @@ with sync_playwright() as p:
     check("a bar has no font setting", sh(pg, "r.getElementById('p-font')") is None)
     pg.evaluate("() => { card._widgets.length = 0; card._add('button', 10, 10); card._widgets[0].label = 'Ok'; card._widgets[0].font = 20; card._setDirty(true); }"); pg.click("display-card >> #save"); pg.wait_for_timeout(300)
     check("saving sends the font size", calls(pg, "display/layout/set")[-1]["pages"][0]["widgets"][0]["font"] == 20)
+
+    # ── click sound (Tastenton) ───────────────────────────────────────────────
+    mount(pg, stub(click={"D1": False, "D2": True}), None, STATES)
+    check("the Tastenton checkbox starts as the display has it (off)", sh(pg, "r.getElementById('click')") is not None and not sh(pg, "r.getElementById('click').checked"))
+    pg.check("display-card >> #click"); pg.wait_for_timeout(200)
+    sent = calls(pg, "display/settings/set")
+    check("ticking it stores the setting at once, for this display", len(sent) == 1 and sent[0]["click"] is True and sent[0]["device_id"] == "D1", sent)
+    check("it does not make the layout dirty", sh(pg, "r.getElementById('save').disabled"))
+    pg.select_option("display-card >> #dev", "D2"); pg.wait_for_timeout(300)
+    check("another display shows its own setting", sh(pg, "r.getElementById('click').checked"))
+    pg.uncheck("display-card >> #click"); pg.wait_for_timeout(200)
+    check("unticking sends false", calls(pg, "display/settings/set")[-1]["click"] is False)
+    mount(pg, stub(click={"D1": True, "D2": False}), None, STATES)
+    check("a display that has it on is shown ticked when loaded", sh(pg, "r.getElementById('click').checked"))
+    pg.select_option("display-card >> #dev", "D2"); pg.wait_for_timeout(300)
+    check("and the other one, which has it off, unticked", not sh(pg, "r.getElementById('click').checked"))
+    mount(pg, stub(settingsError=True), None, STATES)
+    pg.click("display-card >> #click"); pg.wait_for_timeout(200)
+    check("a refused change is shown and the box goes back", not sh(pg, "r.getElementById('click').checked") and "nicht gespeichert" in sh(pg, "r.getElementById('msg').textContent"), sh(pg, "r.getElementById('msg').textContent"))
 
     # ── sidebar panel ─────────────────────────────────────────────────────────
     mount(pg, stub(), None, STATES)

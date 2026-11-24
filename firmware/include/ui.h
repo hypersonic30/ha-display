@@ -3,9 +3,11 @@
 
 void ui_init();
 // Setup hotspot screen. `on_cancel` != null adds an "Abbrechen" button (called from the LVGL task: only set a
-// flag there); `note` is an optional muted line below the address.
+// flag there); `note` is an optional muted line below the address; `on_calibrate` != null adds a "Touch
+// kalibrieren" button (also only sets a flag), so the touch can be calibrated without a phone.
 void ui_show_provisioning(const char *ap_ssid, const char *ap_pass, const char *url,
-                          void (*on_cancel)() = nullptr, const char *note = nullptr);
+                          void (*on_cancel)() = nullptr, const char *note = nullptr,
+                          void (*on_calibrate)() = nullptr);
 void ui_show_connecting(const char *msg);
 void ui_show_error(const char *msg);
 void ui_show_running(const char *ha_url);

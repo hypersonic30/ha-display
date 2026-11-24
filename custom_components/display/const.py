@@ -7,6 +7,7 @@ CONF_DEVICE_KEY = "device_key"
 CONF_NEW_KEY = "new_key"
 CONF_ROTATION = "rotation"
 CONF_SIDEBAR = "sidebar"
+CONF_CLICK = "click"
 
 SUBENTRY_DEVICE = "device"
 
@@ -61,3 +62,24 @@ ICONS = (
 MIN_SIZE = {"media": (200, 100), "thermostat": (140, 90), "arc": (60, 60)}
 OPTIONS_MAX = 16
 OPTION_BYTES = 31
+
+# Buzzer: tone sequences are lists of [frequency Hz, duration ms]; frequency 0 is a pause. The firmware clamps
+# again (firmware/include/beep.h), these are the same limits.
+BEEP_MIN_HZ = 100
+BEEP_MAX_HZ = 5000
+BEEP_MIN_MS = 10
+BEEP_MAX_STEP_MS = 2000
+BEEP_MAX_STEPS = 16
+BEEP_MAX_TOTAL_MS = 5000
+BEEP_MAX_REPEAT = 10
+BEEP_GAP_MS = 150             # pause between repeats
+BEEP_DEFAULT_HZ = 2000
+BEEP_DEFAULT_MS = 200
+BEEP_PRESETS = {
+    "click": [[2500, 20]],
+    "notify": [[1800, 120], [0, 60], [2400, 160]],
+    "alert": [[2800, 200], [0, 100], [2800, 200], [0, 100], [2800, 200]],
+    "doorbell": [[1568, 250], [0, 30], [1175, 400]],
+    "success": [[1500, 90], [0, 40], [2000, 90], [0, 40], [2600, 140]],
+    "error": [[400, 300], [0, 80], [300, 500]],
+}

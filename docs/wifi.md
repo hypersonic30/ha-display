@@ -31,6 +31,7 @@ Es gibt zwei Wege dorthin:
   sind, gehen so auch. Gespeichert wird ohne Verbindungsprobe.
 - **Home Assistant:** URL ist vorausgefüllt. Der Gerätecode wird nicht angezeigt: leer lassen behält ihn.
 - „Verbinden & Speichern“ übernimmt alles und verbindet sofort, ohne Neustart.
+- **Touch neu kalibrieren** (eigene Karte): startet die Vier-Ecken-Kalibrierung am Display. Dasselbe geht am Display mit dem Knopf „Touch kalibrieren“ auf dem Einrichtungsbildschirm, auch ohne Handy. Details: [hardware.md](hardware.md#touch-kalibrierung).
 
 Läuft der Hotspot gleichzeitig mit einem Verbindungsversuch, kann die Netzsuche kurz leer bleiben (nochmal auf ↻).
 
