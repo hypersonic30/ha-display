@@ -27,3 +27,7 @@ void  storage_save_touch(const uint16_t cal[8]);
 // Last applied screen rotation (0..3, 0 = landscape), used right at boot.
 int   storage_load_rotation();
 void  storage_save_rotation(int rotation);
+
+// Backlight level chosen with the slider on the setup screen (10..100 %); 0 = never set.
+int   storage_load_brightness();
+void  storage_save_brightness(int percent);

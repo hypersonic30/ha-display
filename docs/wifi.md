@@ -32,6 +32,7 @@ Es gibt zwei Wege dorthin:
 - **Home Assistant:** URL ist vorausgefüllt. Der Gerätecode wird nicht angezeigt: leer lassen behält ihn.
 - „Verbinden & Speichern“ übernimmt alles und verbindet sofort, ohne Neustart.
 - **Touch neu kalibrieren** (eigene Karte): startet die Vier-Ecken-Kalibrierung am Display. Dasselbe geht am Display mit dem Knopf „Touch kalibrieren“ auf dem Einrichtungsbildschirm, auch ohne Handy. Details: [hardware.md](hardware.md#touch-kalibrierung).
+- **Helligkeit** (ab 0.7.1): Am Einrichtungsbildschirm des Displays gibt es einen Schieberegler (10–100 %). Er wirkt sofort und wird gespeichert; das Display startet damit und zeigt so auch den Einrichtungsbildschirm hell genug. Sobald HA verbunden ist, gilt wieder die Helligkeit aus dem Layout. Ohne Backlight-Pin (-1) gibt es keinen Regler.
 
 Läuft der Hotspot gleichzeitig mit einem Verbindungsversuch, kann die Netzsuche kurz leer bleiben (nochmal auf ↻).
 

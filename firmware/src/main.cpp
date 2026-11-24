@@ -67,14 +67,22 @@ static uint32_t touch_hold_ms() {
     return press_since ? millis() - press_since : 0;
 }
 
-static void set_brightness(int percent) { display_set_brightness(percent); }
+static int cur_brightness = DEFAULT_BRIGHTNESS;
+static void set_brightness(int percent) { cur_brightness = percent; display_set_brightness(percent); }
+
+// Slider on the setup screen: live while dragging, stored when the finger is lifted.
+static void on_portal_brightness(int percent, bool final) {
+    set_brightness(percent);
+    if (final) storage_save_brightness(percent);
+}
 
 static void tft_init() {
     cur_rotation = storage_load_rotation();
     display_begin(hw_cfg);
     display_set_rotation(cur_rotation);
     display_fill_black();
-    set_brightness(DEFAULT_BRIGHTNESS);
+    int saved = storage_load_brightness();
+    set_brightness(saved ? saved : DEFAULT_BRIGHTNESS);
     display_print_ids();
 }
 
@@ -241,7 +249,8 @@ static void show_portal(const char *note) {
     portal_opened = millis();
     strlcpy(portal_note, note ? note : "", sizeof(portal_note));
     ui_show_provisioning(ap_ssid, provisioning_ap_pass(), "192.168.4.1",
-                         portal_cancelable ? on_portal_cancel : nullptr, note, hw_cfg.touch_on ? on_portal_calibrate : nullptr);
+                         portal_cancelable ? on_portal_cancel : nullptr, note, hw_cfg.touch_on ? on_portal_calibrate : nullptr,
+                         cur_brightness, hw_cfg.bl >= 0 ? on_portal_brightness : nullptr);
 }
 
 // First boot (no saved WLAN) or opened by hand from a running page: the hotspot is all that runs.

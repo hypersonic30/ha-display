@@ -67,16 +67,58 @@ static void cb_calibrate(lv_event_t *) {
     if (calibrate_cb) calibrate_cb();
 }
 
+static void (*brightness_cb)(int, bool) = nullptr;
+
+static void cb_brightness(lv_event_t *e) {
+    if (!brightness_cb) return;
+    lv_obj_t *s = lv_event_get_target(e);
+    brightness_cb(lv_slider_get_value(s), lv_event_get_code(e) == LV_EVENT_RELEASED);
+}
+
+// Label + slider in one row of `width` px.
+static void make_brightness_row(lv_obj_t *parent, int width, int value) {
+    lv_obj_t *row = lv_obj_create(parent);
+    lv_obj_set_size(row, width, 30);
+    lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_width(row, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(row, 0, LV_PART_MAIN);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t *l = make_label(row, "Hell.", &ui_font_12, C_MUTED);
+    lv_obj_align(l, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_t *s = lv_slider_create(row);
+    lv_slider_set_range(s, 10, 100);
+    lv_slider_set_value(s, value, LV_ANIM_OFF);
+    lv_obj_set_width(s, width - 48);
+    lv_obj_set_ext_click_area(s, 12);
+    lv_obj_align(s, LV_ALIGN_RIGHT_MID, -6, 0);
+    lv_obj_set_style_bg_color(s, C_MUTED, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s, C_ACCENT, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(s, C_WHITE, LV_PART_KNOB);
+    lv_obj_set_style_pad_all(s, 6, LV_PART_KNOB);
+    lv_obj_add_event_cb(s, cb_brightness, LV_EVENT_VALUE_CHANGED, nullptr);
+    lv_obj_add_event_cb(s, cb_brightness, LV_EVENT_RELEASED, nullptr);
+}
+
 void ui_show_provisioning(const char *ap_ssid, const char *ap_pass, const char *url,
-                          void (*on_cancel)(), const char *note, void (*on_calibrate)()) {
+                          void (*on_cancel)(), const char *note, void (*on_calibrate)(),
+                          int brightness, void (*on_brightness)(int, bool)) {
     clear_screen();
     cancel_cb = on_cancel;
     calibrate_cb = on_calibrate;
+    brightness_cb = on_brightness;
     lv_obj_t *scr = lv_scr_act();
     const int W = scr_w(), H = scr_h();
 
     lv_obj_t *title = make_label(scr, "WLAN & Setup", &ui_font_24, C_ACCENT);
     lv_obj_align(title, LV_ALIGN_TOP_LEFT, 14, 10);
+
+    // Wide screens: the slider sits in the title bar; narrow ones get it at the end of the card.
+    const bool slider_in_header = on_brightness && W >= 440;
+    if (slider_in_header) {
+        make_brightness_row(scr, on_cancel ? 150 : 220, brightness);
+        lv_obj_t *row = lv_obj_get_child(scr, lv_obj_get_child_cnt(scr) - 1);
+        lv_obj_align(row, LV_ALIGN_TOP_MID, on_cancel ? 40 : 60, 8);
+    }
 
     if (on_cancel) {
         lv_obj_t *btn = lv_btn_create(scr);
@@ -136,6 +178,8 @@ void ui_show_provisioning(const char *ap_ssid, const char *ap_pass, const char *
         lv_obj_t *bl = make_label(btn, "Touch kalibrieren", &ui_font_14, C_WHITE);
         lv_obj_center(bl);
     }
+
+    if (on_brightness && !slider_in_header) make_brightness_row(card, inner, brightness);
 }
 
 // ── Connecting screen ─────────────────────────────────────────────────────────

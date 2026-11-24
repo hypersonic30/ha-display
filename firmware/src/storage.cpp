@@ -88,3 +88,18 @@ void storage_save_rotation(int rotation) {
     if (p.getInt("rotation", -1) != rotation) p.putInt("rotation", rotation);
     p.end();
 }
+
+int storage_load_brightness() {
+    Preferences p;
+    p.begin(NS, true);
+    int b = p.getInt("bright", 0);
+    p.end();
+    return (b < 10 || b > 100) ? 0 : b;
+}
+
+void storage_save_brightness(int percent) {
+    Preferences p;
+    p.begin(NS, false);
+    if (p.getInt("bright", -1) != percent) p.putInt("bright", percent);
+    p.end();
+}
