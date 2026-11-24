@@ -11,6 +11,7 @@
 #include "tls.h"
 #include "display.h"
 #include "hw.h"
+#include "hw_json.h"
 #include "buzzer.h"
 
 // ── Display, touch & LVGL ─────────────────────────────────────────────────────
@@ -348,8 +349,29 @@ static void on_frame(const char *type, JsonObjectConst ev) {
     else if (strcmp(type, "beep") == 0) buzzer_play_json(ev["tones"].as<JsonArrayConst>());
 }
 
+// The server may own the hardware settings of this display (`settings.hw`). A differing, valid set is stored
+// and the panel restarts with it; the same set again changes nothing, so this cannot loop. An invalid set is
+// ignored (the server checks too). A wrong set stays harmless: WLAN and HA keep working, so it can be
+// corrected in HA, and repeated crashes reset it (see hw_guard_boot).
+static void apply_hw_from_server(JsonObjectConst hw) {
+    HwConfig c = hw_cfg;
+    hw_apply_json(c, hw);
+    if (const char *why = hw_validate(c)) {
+        Serial.printf("[HW] hardware settings from Home Assistant rejected: %s\n", why);
+        return;
+    }
+    hw_set_managed(true);
+    if (hw_equal(c, hw_cfg)) return;
+    if (!hw_save(c)) { Serial.println("[HW] could not store the hardware settings from Home Assistant"); return; }
+    Serial.println("[HW] hardware settings from Home Assistant changed, restarting");
+    delay(300);
+    ESP.restart();
+}
+
 static void on_layout(JsonObjectConst ev) {
     if (ota_running()) return;   // the update screen stays until the download is over
+    if (ev["settings"]["hw"].is<JsonObjectConst>()) apply_hw_from_server(ev["settings"]["hw"].as<JsonObjectConst>());
+    else hw_set_managed(false);
     click_enabled = ev["settings"]["click"] | false;
     int brightness = ev["settings"]["brightness"] | 0;
     if (brightness > 0) set_brightness(brightness);

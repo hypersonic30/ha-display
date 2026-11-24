@@ -53,7 +53,7 @@ Pinbelegung der Voreinstellung (wie im Schaltplan):
 | Touch CS | 14 | Backlight (TFT_LED) | **32** |
 
 Controller, Pins, SPI-Takt, Backlight und Touch lassen sich seit 0.7.0 **im Einrichtungsportal des
-Displays** ändern (Bereich „Hardware“), ohne neu zu flashen, inklusive Display-Test und Rückweg zu den
+Displays** ändern (Bereich „Hardware“), seit 0.8.0 auch **in Home Assistant** (Display bearbeiten → „Hardware von Home Assistant aus verwalten“), ohne neu zu flashen, inklusive Display-Test und Rückweg zu den
 Standardwerten: siehe [docs/hardware.md](docs/hardware.md). T_IRQ (IO27) und der Piezo-Treiber (IO26) nutzt
 die Firmware standardmäßig nicht.
 
@@ -159,7 +159,7 @@ Grenzen: höchstens 8 Seiten mit je 32 Elementen, Beschriftung und Seitenname �
 
 ### Ausrichtung
 
-Unter **Display bearbeiten** wählst du, wie das Display eingebaut ist (Querformat, Hochformat 90°, Querformat 180°, Hochformat 270°). Die Karte zeigt die Fläche entsprechend, und bei einem Wechsel wird dein Layout automatisch auf die neue Größe angepasst (Elemente werden verschoben oder verkleinert, nichts geht verloren). **Der Touch muss nach einem Wechsel einmal neu kalibriert werden** – das Display fragt automatisch danach. Für jede Ausrichtung wird die Kalibrierung getrennt gespeichert.
+Unter **Display bearbeiten** wählst du, wie das Display eingebaut ist (Querformat, Hochformat 90°, Querformat 180°, Hochformat 270°). Die Karte zeigt die Fläche entsprechend, und bei einem Wechsel wird dein Layout automatisch auf die neue Größe angepasst (Elemente werden verschoben oder verkleinert, nichts geht verloren). Die Touch-Kalibrierung gilt seit 0.7.0 für alle Ausrichtungen; nach einem Wechsel musst du nicht neu kalibrieren.
 
 ## So funktioniert es
 

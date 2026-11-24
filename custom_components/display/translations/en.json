@@ -48,13 +48,15 @@
             "name": "Name",
             "brightness": "Brightness",
             "rotation": "Orientation",
-            "click": "Click on touch"
+            "click": "Click on touch",
+            "hw_manage": "Manage hardware from Home Assistant"
           },
           "data_description": {
             "name": "e.g. Kitchen",
             "brightness": "Backlight strength of this panel",
-            "rotation": "How the display is mounted. Try another setting if the picture is upside down or sideways. The layout is fitted automatically on a change; the touch has to be calibrated once more afterwards.",
-            "click": "A short click from the buzzer on every touch of a button, switch or other control (needs the buzzer on the board). Can also be switched in the editor."
+            "rotation": "How the display is mounted. Try another setting if the picture is upside down or sideways. The layout is fitted automatically on a change; the touch calibration stays valid.",
+            "click": "A short click from the buzzer on every touch of a button, switch or other control (needs the buzzer on the board). Can also be switched in the editor.",
+            "hw_manage": "Set controller, pins and clock here instead of on the display. The next page asks for the values; the display stores them and restarts when they changed. Leave off to keep the settings made in the display's own setup page."
           }
         },
         "reconfigure": {
@@ -64,21 +66,73 @@
             "brightness": "Brightness",
             "new_key": "Generate a new device code",
             "rotation": "Orientation",
-            "click": "Click on touch"
+            "click": "Click on touch",
+            "hw_manage": "Manage hardware from Home Assistant"
           },
           "data_description": {
             "name": "The name comes from the server - the panel does not need changing.",
             "brightness": "Backlight strength of this panel",
             "new_key": "Locks out the display that has the old code; it has to be set up again.",
-            "rotation": "How the display is mounted. Try another setting if the picture is upside down or sideways. The layout is fitted automatically on a change; the touch has to be calibrated once more afterwards.",
-            "click": "A short click from the buzzer on every touch of a button, switch or other control (needs the buzzer on the board). Can also be switched in the editor."
+            "rotation": "How the display is mounted. Try another setting if the picture is upside down or sideways. The layout is fitted automatically on a change; the touch calibration stays valid.",
+            "click": "A short click from the buzzer on every touch of a button, switch or other control (needs the buzzer on the board). Can also be switched in the editor.",
+            "hw_manage": "Set controller, pins and clock here instead of on the display. The next page asks for the values; the display stores them and restarts when they changed. Leave off to keep the settings made in the display's own setup page."
+          }
+        },
+        "hardware": {
+          "title": "Hardware of the display",
+          "description": "Sent to the display when it connects. A wrong value usually leaves the screen black, but WiFi and this connection keep working, so you can correct it here. Pins are GPIO numbers; -1 means not connected.",
+          "data": {
+            "panel": "Display controller",
+            "use_preset": "Use the controller's recommended clock and colours",
+            "mosi": "MOSI (SDI)",
+            "sclk": "SCLK (SCK)",
+            "miso": "MISO (SDO)",
+            "cs": "CS",
+            "dc": "DC (RS)",
+            "rst": "RESET",
+            "bl": "Backlight",
+            "buzzer": "Buzzer",
+            "write_mhz": "Write clock",
+            "read_mhz": "Read clock",
+            "bl_invert": "Backlight is on at LOW",
+            "bgr": "Colour order BGR",
+            "invert": "Invert colours",
+            "touch_on": "Touch (XPT2046) present",
+            "touch_cs": "Touch CS",
+            "touch_irq": "Touch IRQ"
+          },
+          "data_description": {
+            "panel": "Chip on the display module. Wrong controller = black or garbled screen.",
+            "use_preset": "Sets write/read clock, colour order and inversion to the recommended values of the chosen controller and ignores the fields below for those.",
+            "mosi": "SPI data line, shared by display and touch.",
+            "sclk": "SPI clock line.",
+            "miso": "SPI data from the display/touch; input-only pins are fine.",
+            "cs": "Chip select of the display.",
+            "dc": "Data/command line.",
+            "rst": "-1 if the display reset is not wired.",
+            "bl": "-1 for none (always on).",
+            "buzzer": "-1 for none.",
+            "write_mhz": "Lower it first if the screen is black or shows streaks (10 MHz works on the author's board).",
+            "read_mhz": "Rarely matters.",
+            "bl_invert": "Only for modules with an inverted backlight driver.",
+            "bgr": "Switch if red and blue are swapped.",
+            "invert": "Switch if the picture looks like a negative.",
+            "touch_on": "Switch off for modules without touch.",
+            "touch_cs": "Chip select of the touch chip.",
+            "touch_irq": "-1 = not wired; the touch is polled over SPI."
           }
         }
       },
       "error": {
         "name_invalid": "Enter a name.",
         "name_too_long": "The name may be at most 31 characters (umlauts count double).",
-        "name_taken": "A display with this name already exists."
+        "name_taken": "A display with this name already exists.",
+        "hw_panel": "Unknown controller.",
+        "hw_clock": "{what}: 1 to {max} MHz.",
+        "hw_pin_missing": "{pin}: a pin is required.",
+        "hw_pin_unusable": "{pin}: GPIO {gpio} cannot be used (flash, UART or BOOT pin, or it does not exist).",
+        "hw_pin_input_only": "{pin}: GPIO {gpio} is input only.",
+        "hw_pin_duplicate": "GPIO {gpio} is used twice ({other} and {pin})."
       },
       "abort": {
         "reconfigure_successful": "Display updated"
@@ -114,6 +168,14 @@
         "doorbell": "Doorbell",
         "success": "Success",
         "error": "Error"
+      }
+    },
+    "hw_panel": {
+      "options": {
+        "ili9481": "ILI9481",
+        "ili9488": "ILI9488",
+        "ili9486": "ILI9486",
+        "st7796": "ST7796"
       }
     }
   },

@@ -48,13 +48,15 @@
             "name": "Name",
             "brightness": "Helligkeit",
             "rotation": "Ausrichtung",
-            "click": "Klick bei Berührung"
+            "click": "Klick bei Berührung",
+            "hw_manage": "Hardware von Home Assistant aus verwalten"
           },
           "data_description": {
             "name": "z. B. Küche",
             "brightness": "Stärke der Hintergrundbeleuchtung dieses Displays",
-            "rotation": "Wie das Display eingebaut ist. Probiere eine Einstellung aus, falls das Bild auf dem Kopf steht oder gedreht ist. Das Layout wird bei einem Wechsel automatisch angepasst; der Touch muss danach einmal neu kalibriert werden.",
-            "click": "Ein kurzer Klick vom Summer bei jeder Berührung eines Buttons, Schalters oder anderen Bedienelements (braucht den Summer auf der Platine). Lässt sich auch im Editor umschalten."
+            "rotation": "Wie das Display eingebaut ist. Probiere eine Einstellung aus, falls das Bild auf dem Kopf steht oder gedreht ist. Das Layout wird bei einem Wechsel automatisch angepasst; die Touch-Kalibrierung bleibt gültig.",
+            "click": "Ein kurzer Klick vom Summer bei jeder Berührung eines Buttons, Schalters oder anderen Bedienelements (braucht den Summer auf der Platine). Lässt sich auch im Editor umschalten.",
+            "hw_manage": "Controller, Pins und Takt hier statt auf der Einrichtungsseite des Displays einstellen. Die nächste Seite fragt die Werte ab; das Display speichert sie und startet neu, wenn sie sich geändert haben. Aus lassen, um die Einstellungen der Einrichtungsseite zu behalten."
           }
         },
         "reconfigure": {
@@ -64,21 +66,73 @@
             "brightness": "Helligkeit",
             "new_key": "Neuen Gerätecode erzeugen",
             "rotation": "Ausrichtung",
-            "click": "Klick bei Berührung"
+            "click": "Klick bei Berührung",
+            "hw_manage": "Hardware von Home Assistant aus verwalten"
           },
           "data_description": {
             "name": "Der Name kommt vom Server - das Display muss nicht angepasst werden.",
             "brightness": "Stärke der Hintergrundbeleuchtung dieses Displays",
             "new_key": "Sperrt das Display mit dem alten Code aus; es muss danach neu eingerichtet werden.",
-            "rotation": "Wie das Display eingebaut ist. Probiere eine Einstellung aus, falls das Bild auf dem Kopf steht oder gedreht ist. Das Layout wird bei einem Wechsel automatisch angepasst; der Touch muss danach einmal neu kalibriert werden.",
-            "click": "Ein kurzer Klick vom Summer bei jeder Berührung eines Buttons, Schalters oder anderen Bedienelements (braucht den Summer auf der Platine). Lässt sich auch im Editor umschalten."
+            "rotation": "Wie das Display eingebaut ist. Probiere eine Einstellung aus, falls das Bild auf dem Kopf steht oder gedreht ist. Das Layout wird bei einem Wechsel automatisch angepasst; die Touch-Kalibrierung bleibt gültig.",
+            "click": "Ein kurzer Klick vom Summer bei jeder Berührung eines Buttons, Schalters oder anderen Bedienelements (braucht den Summer auf der Platine). Lässt sich auch im Editor umschalten.",
+            "hw_manage": "Controller, Pins und Takt hier statt auf der Einrichtungsseite des Displays einstellen. Die nächste Seite fragt die Werte ab; das Display speichert sie und startet neu, wenn sie sich geändert haben. Aus lassen, um die Einstellungen der Einrichtungsseite zu behalten."
+          }
+        },
+        "hardware": {
+          "title": "Hardware des Displays",
+          "description": "Wird beim Verbinden an das Display geschickt. Ein falscher Wert lässt den Bildschirm meist schwarz, aber WLAN und diese Verbindung laufen weiter, du kannst es also hier korrigieren. Pins sind GPIO-Nummern; -1 heißt nicht angeschlossen.",
+          "data": {
+            "panel": "Display-Controller",
+            "use_preset": "Empfohlenen Takt und Farben des Controllers nehmen",
+            "mosi": "MOSI (SDI)",
+            "sclk": "SCLK (SCK)",
+            "miso": "MISO (SDO)",
+            "cs": "CS",
+            "dc": "DC (RS)",
+            "rst": "RESET",
+            "bl": "Backlight",
+            "buzzer": "Summer",
+            "write_mhz": "Schreibtakt",
+            "read_mhz": "Lesetakt",
+            "bl_invert": "Backlight ist bei LOW an",
+            "bgr": "Farbreihenfolge BGR",
+            "invert": "Farben invertieren",
+            "touch_on": "Touch (XPT2046) vorhanden",
+            "touch_cs": "Touch-CS",
+            "touch_irq": "Touch-IRQ"
+          },
+          "data_description": {
+            "panel": "Chip auf dem Displaymodul. Falscher Controller = schwarzes oder wirres Bild.",
+            "use_preset": "Setzt Schreib-/Lesetakt, Farbreihenfolge und Invertierung auf die empfohlenen Werte des gewählten Controllers; die Felder dafür unten werden dann ignoriert.",
+            "mosi": "SPI-Datenleitung, von Display und Touch gemeinsam genutzt.",
+            "sclk": "SPI-Takt.",
+            "miso": "SPI-Daten vom Display/Touch; reine Eingangs-Pins gehen.",
+            "cs": "Chip-Select des Displays.",
+            "dc": "Daten/Befehl-Leitung.",
+            "rst": "-1, wenn der Display-Reset nicht angeschlossen ist.",
+            "bl": "-1 für keins (immer an).",
+            "buzzer": "-1 für keinen.",
+            "write_mhz": "Bei schwarzem Bild oder Streifen zuerst senken (10 MHz läuft auf der Platine des Autors).",
+            "read_mhz": "Spielt selten eine Rolle.",
+            "bl_invert": "Nur für Module mit invertierter Backlight-Ansteuerung.",
+            "bgr": "Umschalten, wenn Rot und Blau vertauscht sind.",
+            "invert": "Umschalten, wenn das Bild wie ein Negativ aussieht.",
+            "touch_on": "Für Module ohne Touch ausschalten.",
+            "touch_cs": "Chip-Select des Touch-Chips.",
+            "touch_irq": "-1 = nicht angeschlossen; der Touch wird dann über SPI abgefragt."
           }
         }
       },
       "error": {
         "name_invalid": "Gib einen Namen ein.",
         "name_too_long": "Der Name darf höchstens 31 Zeichen haben (Umlaute zählen doppelt).",
-        "name_taken": "Ein Display mit diesem Namen gibt es schon."
+        "name_taken": "Ein Display mit diesem Namen gibt es schon.",
+        "hw_panel": "Unbekannter Controller.",
+        "hw_clock": "{what}: 1 bis {max} MHz.",
+        "hw_pin_missing": "{pin}: Pin fehlt.",
+        "hw_pin_unusable": "{pin}: GPIO {gpio} ist nicht nutzbar (Flash, UART, BOOT oder nicht vorhanden).",
+        "hw_pin_input_only": "{pin}: GPIO {gpio} ist nur Eingang.",
+        "hw_pin_duplicate": "GPIO {gpio} doppelt belegt ({other} und {pin})."
       },
       "abort": {
         "reconfigure_successful": "Display aktualisiert"
@@ -114,6 +168,14 @@
         "doorbell": "Türklingel",
         "success": "Erfolg",
         "error": "Fehler"
+      }
+    },
+    "hw_panel": {
+      "options": {
+        "ili9481": "ILI9481",
+        "ili9488": "ILI9488",
+        "ili9486": "ILI9486",
+        "st7796": "ST7796"
       }
     }
   },

@@ -4,6 +4,26 @@ Display-Controller, SPI-Pins, Takt, Backlight und Touch werden **zur Laufzeit** 
 Displays eingestellt, ohne neu zu kompilieren. Die Firmware nutzt dafür LovyanGFX statt TFT_eSPI; die
 Init-Folgen und Drehungen der Controller sind die von TFT_eSPI, ein Panel, das vorher lief, sieht gleich aus.
 
+## Von Home Assistant aus einstellen (ab 0.8.0)
+
+Statt im Portal lassen sich dieselben Werte in Home Assistant setzen: Einstellungen → Geräte & Dienste →
+Display → bei dem Display **Bearbeiten**, Schalter **„Hardware von Home Assistant aus verwalten“**. Die nächste
+Seite fragt Controller, Pins, Takt und Flags ab (Vorgabe: die Werte unten). „Empfohlenen Takt und Farben des
+Controllers nehmen“ setzt Takt, Farbreihenfolge und Invertierung auf die Empfehlung des gewählten Controllers.
+
+- Die Werte werden beim Verbinden an das Display geschickt. Weichen sie von dem ab, was es läuft, speichert es
+  sie und **startet neu**. Gleiche Werte ändern nichts.
+- Ein falscher Wert lässt das Bild schwarz, aber **WLAN und die Verbindung zu HA laufen weiter**: du korrigierst
+  es einfach wieder in HA. Stürzt das Display mit den Werten dreimal direkt nach dem Start ab, setzt es die
+  Hardware auf die Standardwerte zurück (und holt sie beim nächsten Verbinden erneut aus HA, falls der Schalter an
+  ist; zum Aufhören den Schalter ausschalten). Die BOOT-Taste (3 s in den ersten 30 s) macht dasselbe.
+- Solange der Schalter an ist, **gewinnt HA**: Änderungen im Portal gelten nur bis zur nächsten Verbindung. Das
+  Portal weist darauf hin.
+- Schaltest du ihn aus, behält das Display die zuletzt gespeicherten Werte; im Portal kannst du sie wieder ändern.
+- Dem Display kann man dort nur Werte schicken, die die Firmware auch akzeptiert (gleiche Prüfungen wie im
+  Portal): doppelte Pins, Flash-/UART-/BOOT-Pins, reine Eingangs-Pins als Ausgang und Takt außerhalb 1–40 MHz
+  werden schon im Formular abgelehnt.
+
 ## Standardwerte (Schaltplan dieses Projekts)
 
 | Signal | GPIO | Signal | GPIO |

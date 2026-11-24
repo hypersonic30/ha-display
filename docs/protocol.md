@@ -13,6 +13,17 @@ widget fields must be ignored by the firmware.
 
 `page.bg` is only present when the page has its own background colour (default: the built-in dark theme).
 
+### `settings.hw` (since 0.8.0)
+
+Present only when the display's hardware settings are managed in Home Assistant (config flow, "Manage hardware
+from Home Assistant"). An object with the keys of the portal's hardware section: `panel` (0 ILI9481, 1 ILI9488,
+2 ILI9486, 3 ST7796), `mosi`, `sclk`, `miso`, `cs`, `dc`, `rst`, `bl`, `bl_invert`, `write_mhz`, `read_mhz`,
+`touch_on`, `touch_cs`, `touch_irq`, `bgr`, `invert`, `buzzer` (pins are GPIO numbers, -1 = not connected).
+Missing keys keep the panel's value. The firmware validates the set (the same checks as the portal: ranges,
+flash/UART/BOOT pins, input-only pins, duplicates), ignores an invalid one and otherwise compares it with what
+it runs: if it differs, it stores the set and restarts, if not nothing happens (so the frame can be sent on
+every connection). Without `settings.hw` the panel keeps whatever it has (own defaults or the portal's values).
+
 ## Widget object (wire format)
 
 The server only sends fields that differ from their default, so the firmware must treat a missing field as the

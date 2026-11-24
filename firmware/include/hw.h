@@ -36,6 +36,14 @@ void hw_reset_stored();                          // forget the stored configurat
 // nullptr = fine, else a short German reason. Checks ranges, input-only/flash/UART pins and duplicates.
 const char *hw_validate(const HwConfig &cfg);
 
+// Same hardware (ignores the storage layout version).
+bool hw_equal(const HwConfig &a, const HwConfig &b);
+
+// "Managed by Home Assistant": the server sent a hardware section for this display. Only a flag for the
+// portal, which then says so; the values themselves are stored like any other hardware configuration.
+bool hw_managed();
+void hw_set_managed(bool on);
+
 void hw_print(const HwConfig &cfg);              // boot log
 
 // Recovery: a wrong pin/driver can leave the screen blank or crash the firmware before the portal is

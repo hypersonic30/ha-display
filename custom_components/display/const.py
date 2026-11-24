@@ -8,6 +8,8 @@ CONF_NEW_KEY = "new_key"
 CONF_ROTATION = "rotation"
 CONF_SIDEBAR = "sidebar"
 CONF_CLICK = "click"
+CONF_HW_MANAGE = "hw_manage"   # Home Assistant owns the hardware settings of this display
+CONF_HW = "hw"                 # ... and they are stored here (keys: see hw.py)
 
 SUBENTRY_DEVICE = "device"
 

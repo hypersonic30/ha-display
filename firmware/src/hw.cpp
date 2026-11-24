@@ -120,6 +120,27 @@ bool hw_save(const HwConfig &c) {
     return ok;
 }
 
+bool hw_equal(const HwConfig &a, const HwConfig &b) {
+    HwConfig x = a, y = b;
+    x.ver = y.ver = 0;
+    return memcmp(&x, &y, sizeof(x)) == 0;
+}
+
+bool hw_managed() {
+    Preferences p;
+    p.begin(NS, true);
+    bool on = p.getBool("hw_ha", false);
+    p.end();
+    return on;
+}
+
+void hw_set_managed(bool on) {
+    Preferences p;
+    p.begin(NS, false);
+    if (p.getBool("hw_ha", false) != on) p.putBool("hw_ha", on);
+    p.end();
+}
+
 void hw_reset_stored() {
     Preferences p;
     p.begin(NS, false);

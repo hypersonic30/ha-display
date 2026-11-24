@@ -8,10 +8,13 @@ from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.core import HomeAssistant
 from homeassistant.util import slugify
 
+from .hw import DEFAULTS
 from .const import (
     CONF_BRIGHTNESS,
     CONF_CLICK,
     CONF_DEVICE_KEY,
+    CONF_HW,
+    CONF_HW_MANAGE,
     CONF_ROTATION,
     DEFAULT_BRIGHTNESS,
     DEFAULT_ROTATION,
@@ -56,6 +59,14 @@ def brightness_of(sub: ConfigSubentry) -> int:
 def click_of(sub: ConfigSubentry) -> bool:
     """Short click on every press of an operable widget (needs the buzzer)."""
     return bool(sub.data.get(CONF_CLICK, False))
+
+
+def hw_of(sub: ConfigSubentry) -> dict[str, int] | None:
+    """The hardware settings Home Assistant owns for this display, or None (the display keeps its own)."""
+    if not sub.data.get(CONF_HW_MANAGE):
+        return None
+    stored = sub.data.get(CONF_HW)
+    return {**DEFAULTS, **{k: int(v) for k, v in stored.items() if k in DEFAULTS}} if isinstance(stored, dict) else None
 
 
 def rotation_of(sub: ConfigSubentry) -> int:

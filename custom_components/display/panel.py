@@ -31,7 +31,7 @@ from .const import (
     OPTIONS_MAX,
     THERMOSTAT_ACTIONS,
 )
-from .devices import brightness_of, click_of, find_by_key, get_entry, rotation_of, screen_size
+from .devices import brightness_of, click_of, find_by_key, get_entry, hw_of, rotation_of, screen_size
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -186,11 +186,14 @@ class PanelSession:
         info = {"index": self._page, "count": len(pages), "name": page["name"]}
         if page.get("bg"):
             info["bg"] = page["bg"]
+        settings: dict[str, Any] = {"brightness": brightness_of(sub), "rotation": rotation_of(sub), "click": click_of(sub)}
+        if (hw := hw_of(sub)) is not None:
+            settings["hw"] = hw       # only for displays whose hardware settings Home Assistant owns
         return {
             "type": "layout",
             "name": sub.title,
             "rev": layout["rev"],
-            "settings": {"brightness": brightness_of(sub), "rotation": rotation_of(sub), "click": click_of(sub)},
+            "settings": settings,
             "screen": {"w": width, "h": height},
             "page": info,
             # Only worth showing when there is somewhere to go.

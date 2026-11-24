@@ -5,6 +5,7 @@
 #include <ArduinoJson.h>
 #include <lvgl.h>
 #include "hw.h"
+#include "hw_json.h"
 #include "buzzer.h"
 #include "display.h"
 
@@ -123,6 +124,7 @@ details.card[open] summary{margin-bottom:12px}
 <details class="card" id="hwbox">
   <summary class="hwsum">Hardware (Display &amp; Touch) &ndash; nur bei Bedarf</summary>
   <p class="hint warn">Falsche Werte lassen das Display schwarz. Das Einrichtungs-WLAN funktioniert trotzdem. Zurück zu den Standardwerten: unten &bdquo;Auf Standard zurücksetzen&ldquo;, oder die BOOT-Taste in den ersten 30 Sekunden nach dem Einschalten 3 Sekunden halten. Nach drei Abstürzen direkt nach dem Start werden die Standardwerte ebenfalls wiederhergestellt.</p>
+  <p class="hint warn" id="hwman" style="display:none"><b>Von Home Assistant verwaltet.</b> Diese Werte kommen aus den Einstellungen des Displays in Home Assistant und werden beim nächsten Verbinden dort wieder gesetzt. Änderungen hier gelten nur, bis das Display wieder mit Home Assistant verbunden ist.</p>
   <label>Display-Controller</label>
   <select id="hw_panel"></select>
   <div class="grid">
@@ -215,6 +217,7 @@ async function hwInit(){
     const sel=document.getElementById('hw_panel');
     sel.innerHTML=j.names.map((n,i)=>'<option value="'+i+'">'+esc(n)+'</option>').join('');
     hwPresets=j.presets;
+    if(j.managed)document.getElementById('hwman').style.display='block';
     hwFill(j.cfg);
     sel.addEventListener('change',()=>{
       const p=hwPresets[+sel.value];
@@ -429,20 +432,12 @@ static void handle_save() {
 
 // ── Hardware (display / touch) ────────────────────────────────────────────────
 
-static void hw_to_json(const HwConfig &c, JsonObject o) {
-    o["panel"] = c.panel;
-    o["mosi"] = c.mosi; o["sclk"] = c.sclk; o["miso"] = c.miso;
-    o["cs"] = c.cs; o["dc"] = c.dc; o["rst"] = c.rst; o["bl"] = c.bl;
-    o["bl_invert"] = c.bl_invert; o["write_mhz"] = c.write_mhz; o["read_mhz"] = c.read_mhz;
-    o["touch_on"] = c.touch_on; o["touch_cs"] = c.touch_cs; o["touch_irq"] = c.touch_irq;
-    o["bgr"] = c.bgr; o["invert"] = c.invert; o["buzzer"] = c.buzzer;
-}
-
 static void handle_hw_get() {
     JsonDocument doc;
     HwConfig c;
     hw_load(c);
     hw_to_json(c, doc["cfg"].to<JsonObject>());
+    doc["managed"] = hw_managed();
     JsonArray names = doc["names"].to<JsonArray>();
     JsonArray presets = doc["presets"].to<JsonArray>();
     for (uint8_t i = 0; i < PANEL_COUNT; i++) {
@@ -463,16 +458,7 @@ static void handle_hw_save() {
     if (deserializeJson(doc, server.arg("plain"))) return fail("invalid json");
     HwConfig c;
     hw_defaults(c);
-    c.panel     = doc["panel"] | c.panel;
-    c.mosi      = doc["mosi"] | c.mosi;   c.sclk = doc["sclk"] | c.sclk;   c.miso = doc["miso"] | c.miso;
-    c.cs        = doc["cs"] | c.cs;       c.dc   = doc["dc"] | c.dc;       c.rst  = doc["rst"] | c.rst;
-    c.bl        = doc["bl"] | c.bl;
-    c.bl_invert = doc["bl_invert"] | c.bl_invert;
-    c.write_mhz = doc["write_mhz"] | c.write_mhz;   c.read_mhz = doc["read_mhz"] | c.read_mhz;
-    c.touch_on  = doc["touch_on"] | c.touch_on;
-    c.touch_cs  = doc["touch_cs"] | c.touch_cs;     c.touch_irq = doc["touch_irq"] | c.touch_irq;
-    c.bgr       = doc["bgr"] | c.bgr;               c.invert = doc["invert"] | c.invert;
-    c.buzzer    = doc["buzzer"] | c.buzzer;
+    hw_apply_json(c, doc.as<JsonObjectConst>());
     if (const char *why = hw_validate(c)) return fail(why);
     if (!hw_save(c)) return fail("Speichern fehlgeschlagen");
     send_json(200, "{\"ok\":true}");
