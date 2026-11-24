@@ -170,6 +170,16 @@ Das Protokoll zwischen Display und Integration steht in [docs/protocol.md](docs/
 
 Das Display hält **eine** Verbindung zur Integration. Die schickt Layout und Zustände der Entitäten im Layout (live) und nimmt Taps entgegen. Welcher Dienst dabei aufgerufen wird, entscheidet die Integration anhand des gespeicherten Layouts – das Display nennt nur die Element-ID.
 
+## WLAN wechseln
+
+Das Display speichert bis zu drei WLANs (z. B. Zuhause und Handy-Hotspot) und probiert sie der Reihe nach.
+Das Einrichtungsportal öffnet sich wieder:
+
+- **automatisch**, wenn 90 Sekunden lang kein gespeichertes WLAN erreichbar ist (das Display versucht es im Hintergrund weiter und schließt das Portal, sobald ein Netz wieder da ist),
+- **per langem Druck** (3 Sekunden) auf eine leere Stelle der Seite, also dort, wo kein bedienbares Element liegt. „Abbrechen“ oder 5 Minuten ohne Eingabe führen zurück in den Normalbetrieb.
+
+Im Portal (WLAN des Displays, Adresse `192.168.4.1`) lassen sich WLANs hinzufügen und entfernen sowie die HA-URL ändern. Details und Grenzen: [docs/wifi.md](docs/wifi.md).
+
 ## Fehlersuche
 
 | Anzeige / Verhalten | Ursache |
