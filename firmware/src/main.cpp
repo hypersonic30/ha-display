@@ -13,6 +13,7 @@
 #include "hw.h"
 #include "hw_json.h"
 #include "buzzer.h"
+#include "lab.h"
 
 // ── Display, touch & LVGL ─────────────────────────────────────────────────────
 
@@ -463,6 +464,25 @@ void setup() {
     Serial.println("[BOOT] stage: ui");
     ui_init();
     hw_guard_poll();
+#ifdef DISPLAY_NOWIFI
+    // Supply test: no radio at all, only a full-screen colour. A tap changes the colour.
+    {
+        const uint16_t cols[] = {0xFFFF, 0x8410, 0x0000, 0xF800, 0x07E0, 0x001F};
+        int k = 0;
+        display_set_brightness(100);
+        display_fill(cols[0]);
+        Serial.println("[NOWIFI] radio stays off, tap to change the colour");
+        for (;;) {
+            uint16_t x, y;
+            if (display_touch(x, y)) {
+                k = (k + 1) % 6;
+                display_fill(cols[k]);
+                while (display_touch(x, y)) delay(20);
+            }
+            delay(20);
+        }
+    }
+#endif
     build_ap_ssid();
     Serial.println("[BOOT] stage: storage");
 
@@ -494,6 +514,14 @@ void loop() {
         run_calibration();
         lv_obj_invalidate(lv_scr_act());   // the layout objects are still there, only the pixels are gone
     }
+#ifdef DISPLAY_LAB
+    // Test builds: hold the top-left corner for 2 s to open the register lab.
+    if (press_since && press_x < 50 && press_y < 50 && touch_hold_ms() >= 2000 && !ota_running()) {
+        press_since = 0;
+        lab_run();
+        return;
+    }
+#endif
     lv_task_handler();
     ota_loop_tick(WiFi.status() == WL_CONNECTED);
 

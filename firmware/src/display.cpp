@@ -200,6 +200,7 @@ void display_flush(int x1, int y1, int x2, int y2, const uint16_t *px) {
 }
 
 void display_fill_black() { tft.fillScreen(0); }
+void display_fill(uint16_t c) { tft.fillScreen(c); }
 
 bool display_touch(uint16_t &x, uint16_t &y) {
     if (!touch_present) return false;
@@ -299,4 +300,11 @@ void display_test() {
     }
     tft.fillScreen(0);
     Serial.println("[HW] test done: expected red, green, blue, white (other colours = colour order / inversion)");
+}
+
+void display_write_reg(uint8_t reg, const uint8_t *params, int n) {
+    tft.startWrite();
+    tft.writeCommand(reg);
+    for (int i = 0; i < n; i++) tft.writeData(params[i]);
+    tft.endWrite();
 }
